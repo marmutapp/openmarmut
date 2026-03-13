@@ -20,7 +20,7 @@ func newIntegrationRuntime(t *testing.T) *DockerRuntime {
 	dir := t.TempDir()
 
 	cfg := config.DockerConfig{
-		Image:       "ubuntu:24.04",
+		Image:       "ubuntu:20.04",
 		MountPath:   "/workspace",
 		Shell:       "sh",
 		NetworkMode: "none",

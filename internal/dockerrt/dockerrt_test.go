@@ -121,7 +121,7 @@ var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func testConfig() config.DockerConfig {
 	return config.DockerConfig{
-		Image:       "ubuntu:24.04",
+		Image:       "ubuntu:20.04",
 		MountPath:   "/workspace",
 		Shell:       "sh",
 		NetworkMode: "none",
@@ -201,7 +201,7 @@ func TestDockerRuntime_Init_ImagePull(t *testing.T) {
 		},
 		imagePullFn: func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
 			pullCalled = true
-			assert.Equal(t, "ubuntu:24.04", refStr)
+			assert.Equal(t, "ubuntu:20.04", refStr)
 			return io.NopCloser(strings.NewReader("{}")), nil
 		},
 	}
@@ -282,7 +282,7 @@ func TestDockerRuntime_Init_ContainerConfig(t *testing.T) {
 	err := rt.Init(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, "ubuntu:24.04", capturedCfg.Image)
+	assert.Equal(t, "ubuntu:20.04", capturedCfg.Image)
 	assert.Equal(t, []string{"sleep", "infinity"}, []string(capturedCfg.Cmd))
 	assert.Equal(t, "/workspace", capturedCfg.WorkingDir)
 	assert.Contains(t, capturedHostCfg.Binds[0], "/tmp/test:/workspace")
