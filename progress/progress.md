@@ -54,17 +54,17 @@
 - [x] Smoke test: `go run ./cmd/opencode read README.md`
 
 ## Phase 5: Docker Runtime
-- [ ] `internal/dockerrt/dockerrt.go` — struct, New, Init (container create/start)
-- [ ] `internal/dockerrt/dockerrt.go` — Close (stop + remove)
-- [ ] `internal/dockerrt/dockerrt.go` — ReadFile (base64 via docker exec)
-- [ ] `internal/dockerrt/dockerrt.go` — WriteFile (stdin pipe)
-- [ ] `internal/dockerrt/dockerrt.go` — DeleteFile
-- [ ] `internal/dockerrt/dockerrt.go` — ListDir
-- [ ] `internal/dockerrt/dockerrt.go` — MkDir
-- [ ] `internal/dockerrt/dockerrt.go` — Exec (multiplexed stream handling)
-- [ ] `internal/dockerrt/dockerrt_test.go` — unit tests (mocked Docker client)
-- [ ] `internal/dockerrt/dockerrt_integration_test.go` — real Docker tests
-- [ ] Runtime compliance test (docker)
+- [x] `internal/dockerrt/dockerrt.go` — struct, New, Init (container create/start)
+- [x] `internal/dockerrt/dockerrt.go` — Close (stop + remove)
+- [x] `internal/dockerrt/dockerrt.go` — ReadFile (base64 via docker exec)
+- [x] `internal/dockerrt/dockerrt.go` — WriteFile (base64 encode via docker exec)
+- [x] `internal/dockerrt/dockerrt.go` — DeleteFile
+- [x] `internal/dockerrt/dockerrt.go` — ListDir
+- [x] `internal/dockerrt/dockerrt.go` — MkDir
+- [x] `internal/dockerrt/dockerrt.go` — Exec (multiplexed stream handling via stdcopy)
+- [x] `internal/dockerrt/dockerrt_test.go` — unit tests (mocked Docker client, 40 tests)
+- [x] `internal/dockerrt/dockerrt_integration_test.go` — real Docker tests (gated by build tags)
+- [x] Runtime compliance test (docker)
 
 ## Phase 6: Integration & Polish
 - [ ] `internal/runtime/factory.go` — NewRuntime factory
@@ -95,5 +95,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 2 | All foundation modules implemented with tests: runtime interface, pathutil, config, logger. All tests pass. | Start Phase 3: local runtime
 2026-03-13 | Phase 3 | LocalRuntime fully implemented: all 8 methods + 44 tests. Atomic writes, path sandboxing, exit-code-not-error, process group kill on timeout. | Start Phase 4: CLI
 2026-03-13 | Phase 4 | CLI complete: root+runner+7 commands+main.go. Cobra-based with global flags, Runner lifecycle pattern. All smoke tests pass (read, write, delete, ls, mkdir, exec, info). | Start Phase 5: Docker runtime
+2026-03-13 | Phase 5 | DockerRuntime fully implemented: all 9 Runtime methods, dockerClient interface for testability, 40 unit tests (mocked), 16 integration tests (build-tagged). Base64 file I/O, stdcopy stream demux, container lifecycle, path sandboxing, shell quoting. | Start Phase 6: Integration & polish
 
 <!-- Claude: append a new line here after each working session -->
