@@ -3,12 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/gajaai/opencode-go/internal/config"
-	"github.com/gajaai/opencode-go/internal/localrt"
 	"github.com/gajaai/opencode-go/internal/logger"
 	"github.com/gajaai/opencode-go/internal/runtime"
+
+	// Register runtime implementations.
+	_ "github.com/gajaai/opencode-go/internal/dockerrt"
+	_ "github.com/gajaai/opencode-go/internal/localrt"
 )
 
 // Runner manages the config → logger → runtime → init → fn → close lifecycle.
@@ -30,7 +32,7 @@ func (r *Runner) Run(ctx context.Context, fn func(ctx context.Context, rt runtim
 
 	log := logger.New(cfg.Log)
 
-	rt, err := newRuntime(cfg, log)
+	rt, err := runtime.NewRuntime(cfg, log)
 	if err != nil {
 		return fmt.Errorf("cli.Runner.Run: %w", err)
 	}
@@ -45,14 +47,4 @@ func (r *Runner) Run(ctx context.Context, fn func(ctx context.Context, rt runtim
 	}()
 
 	return fn(ctx, rt)
-}
-
-// newRuntime creates a Runtime from config. Only local mode is supported for now.
-func newRuntime(cfg *config.Config, log *slog.Logger) (runtime.Runtime, error) {
-	switch cfg.Mode {
-	case "local":
-		return localrt.New(cfg.TargetDir, cfg.DefaultTimeout, log), nil
-	default:
-		return nil, fmt.Errorf("unsupported runtime mode: %q", cfg.Mode)
-	}
 }

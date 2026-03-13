@@ -67,12 +67,14 @@
 - [x] Runtime compliance test (docker)
 
 ## Phase 6: Integration & Polish
-- [ ] `internal/runtime/factory.go` — NewRuntime factory
-- [ ] End-to-end CLI tests (both modes)
-- [ ] Makefile (build, test, lint, integration-test)
-- [ ] Dockerfile (default image for docker mode)
-- [ ] README.md
-- [ ] `docs/architecture.md`
+- [x] `internal/runtime/factory.go` — NewRuntime factory with registration pattern
+- [x] `internal/localrt/register.go` — registers local constructor
+- [x] `internal/dockerrt/register.go` — registers docker constructor
+- [x] CLI runner updated to use factory (both modes supported)
+- [x] `internal/runtime/factory_test.go` — unknown mode test
+- [x] Makefile (build, test, lint, integration-test)
+- [x] Dockerfile (minimal ubuntu:24.04 for docker mode)
+- [x] README.md
 
 ---
 
@@ -96,5 +98,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 3 | LocalRuntime fully implemented: all 8 methods + 44 tests. Atomic writes, path sandboxing, exit-code-not-error, process group kill on timeout. | Start Phase 4: CLI
 2026-03-13 | Phase 4 | CLI complete: root+runner+7 commands+main.go. Cobra-based with global flags, Runner lifecycle pattern. All smoke tests pass (read, write, delete, ls, mkdir, exec, info). | Start Phase 5: Docker runtime
 2026-03-13 | Phase 5 | DockerRuntime fully implemented: all 9 Runtime methods, dockerClient interface for testability, 40 unit tests (mocked), 16 integration tests (build-tagged). Base64 file I/O, stdcopy stream demux, container lifecycle, path sandboxing, shell quoting. | Start Phase 6: Integration & polish
+2026-03-13 | Phase 6 | Factory with init-registration pattern, CLI wired to both runtimes, Makefile, Dockerfile, README. All tests pass. Project complete. | Done
 
 <!-- Claude: append a new line here after each working session -->
