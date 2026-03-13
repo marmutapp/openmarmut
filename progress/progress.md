@@ -30,15 +30,15 @@
 - [x] `internal/logger/logger_test.go`
 
 ## Phase 3: Local Runtime
-- [ ] `internal/localrt/localrt.go` — struct, New, Init, Close
-- [ ] `internal/localrt/localrt.go` — ReadFile (path sandboxing)
-- [ ] `internal/localrt/localrt.go` — WriteFile (atomic write)
-- [ ] `internal/localrt/localrt.go` — DeleteFile
-- [ ] `internal/localrt/localrt.go` — ListDir
-- [ ] `internal/localrt/localrt.go` — MkDir
-- [ ] `internal/localrt/localrt.go` — Exec (timeout, exit code handling)
-- [ ] `internal/localrt/localrt_test.go` — full unit test suite
-- [ ] Runtime compliance test (local)
+- [x] `internal/localrt/localrt.go` — struct, New, Init, Close
+- [x] `internal/localrt/localrt.go` — ReadFile (path sandboxing)
+- [x] `internal/localrt/localrt.go` — WriteFile (atomic write)
+- [x] `internal/localrt/localrt.go` — DeleteFile
+- [x] `internal/localrt/localrt.go` — ListDir
+- [x] `internal/localrt/localrt.go` — MkDir
+- [x] `internal/localrt/localrt.go` — Exec (timeout, exit code handling)
+- [x] `internal/localrt/localrt_test.go` — full unit test suite
+- [x] Runtime compliance test (local)
 
 ## Phase 4: CLI
 - [ ] `internal/cli/root.go` — root cobra command + global flags
@@ -93,5 +93,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 
 2026-03-13 | Phase 1 | Design complete. Specs, CLAUDE.md, rules, progress tracker created. | Start Phase 2: go.mod + foundation modules
 2026-03-13 | Phase 2 | All foundation modules implemented with tests: runtime interface, pathutil, config, logger. All tests pass. | Start Phase 3: local runtime
+2026-03-13 | Phase 3 | LocalRuntime fully implemented: all 8 methods + 44 tests. Atomic writes, path sandboxing, exit-code-not-error, process group kill on timeout. | Start Phase 4: CLI
 
 <!-- Claude: append a new line here after each working session -->
