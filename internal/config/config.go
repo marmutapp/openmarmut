@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gajaai/opencode-go/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,6 +18,22 @@ type Config struct {
 	Docker         DockerConfig  `yaml:"docker"`
 	Log            LogConfig     `yaml:"log"`
 	DefaultTimeout time.Duration `yaml:"default_timeout"`
+	LLM            LLMConfig     `yaml:"llm"`
+}
+
+// LLMConfig holds all LLM provider configuration.
+type LLMConfig struct {
+	Providers          []llm.ProviderEntry `yaml:"providers"`
+	ActiveProvider     string              `yaml:"active_provider"`
+	DefaultTemperature *float64            `yaml:"default_temperature"`
+	DefaultMaxTokens   *int                `yaml:"default_max_tokens"`
+	DefaultTimeout     time.Duration       `yaml:"default_timeout"`
+	// ModelOverride is set from OPENCODE_LLM_MODEL env or --model flag.
+	// Applied to the active provider at resolution time.
+	ModelOverride string `yaml:"-"`
+	// APIKeyOverride is set from OPENCODE_LLM_API_KEY env.
+	// Applied to the active provider at resolution time.
+	APIKeyOverride string `yaml:"-"`
 }
 
 // DockerConfig holds Docker-specific settings.
@@ -39,12 +56,15 @@ type LogConfig struct {
 
 // FlagOverrides holds CLI flag values. Nil means "not set".
 type FlagOverrides struct {
-	Mode        *string
-	TargetDir   *string
-	ConfigPath  *string
-	LogLevel    *string
-	LogFormat   *string
-	DockerImage *string
+	Mode           *string
+	TargetDir      *string
+	ConfigPath     *string
+	LogLevel       *string
+	LogFormat      *string
+	DockerImage    *string
+	LLMProvider    *string  // --provider flag → overrides active_provider
+	LLMModel       *string  // --model flag → overrides active provider's model
+	LLMTemperature *float64 // --temperature flag
 }
 
 // defaults returns a Config with sensible default values.
@@ -173,6 +193,17 @@ func applyEnv(cfg *Config) {
 			cfg.DefaultTimeout = d
 		}
 	}
+
+	// LLM env overrides.
+	if v := os.Getenv("OPENCODE_LLM_PROVIDER"); v != "" {
+		cfg.LLM.ActiveProvider = v
+	}
+	if v := os.Getenv("OPENCODE_LLM_MODEL"); v != "" {
+		cfg.LLM.ModelOverride = v
+	}
+	if v := os.Getenv("OPENCODE_LLM_API_KEY"); v != "" {
+		cfg.LLM.APIKeyOverride = v
+	}
 }
 
 // applyFlags applies non-nil CLI flag overrides onto cfg.
@@ -191,6 +222,15 @@ func applyFlags(cfg *Config, flags *FlagOverrides) {
 	}
 	if flags.DockerImage != nil {
 		cfg.Docker.Image = *flags.DockerImage
+	}
+	if flags.LLMProvider != nil {
+		cfg.LLM.ActiveProvider = *flags.LLMProvider
+	}
+	if flags.LLMModel != nil {
+		cfg.LLM.ModelOverride = *flags.LLMModel
+	}
+	if flags.LLMTemperature != nil {
+		cfg.LLM.DefaultTemperature = flags.LLMTemperature
 	}
 }
 
@@ -229,9 +269,120 @@ func Validate(cfg *Config) error {
 		errs = append(errs, fmt.Sprintf("log.format must be text/json, got %q", cfg.Log.Format))
 	}
 
+	// Validate LLM config if any providers are configured.
+	if len(cfg.LLM.Providers) > 0 {
+		validateLLM(&cfg.LLM, &errs)
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 
+	return nil
+}
+
+// validProviderTypes lists the recognized wire format type names.
+var validProviderTypes = map[string]bool{
+	"openai":    true,
+	"anthropic": true,
+	"gemini":    true,
+	"ollama":    true,
+	"custom":    true,
+}
+
+// validateLLM checks the LLM config section and appends any errors to errs.
+func validateLLM(llmCfg *LLMConfig, errs *[]string) {
+	seen := make(map[string]bool, len(llmCfg.Providers))
+	for i, p := range llmCfg.Providers {
+		prefix := fmt.Sprintf("llm.providers[%d]", i)
+		if p.Name == "" {
+			*errs = append(*errs, prefix+".name must not be empty")
+		} else if seen[p.Name] {
+			*errs = append(*errs, fmt.Sprintf("%s.name %q is a duplicate", prefix, p.Name))
+		} else {
+			seen[p.Name] = true
+		}
+		if !validProviderTypes[p.Type] {
+			*errs = append(*errs, fmt.Sprintf("%s.type must be openai/anthropic/gemini/ollama/custom, got %q", prefix, p.Type))
+		}
+		if p.ModelName == "" {
+			*errs = append(*errs, prefix+".model must not be empty")
+		}
+		if p.Temperature != nil && (*p.Temperature < 0 || *p.Temperature > 2) {
+			*errs = append(*errs, fmt.Sprintf("%s.temperature must be in [0.0, 2.0], got %g", prefix, *p.Temperature))
+		}
+		if p.MaxTokens != nil && *p.MaxTokens <= 0 {
+			*errs = append(*errs, fmt.Sprintf("%s.max_tokens must be positive, got %d", prefix, *p.MaxTokens))
+		}
+	}
+
+	// active_provider must match a named provider if set.
+	if llmCfg.ActiveProvider != "" && !seen[llmCfg.ActiveProvider] {
+		*errs = append(*errs, fmt.Sprintf("llm.active_provider %q does not match any configured provider name", llmCfg.ActiveProvider))
+	}
+
+	// LLM-level defaults.
+	if llmCfg.DefaultTemperature != nil && (*llmCfg.DefaultTemperature < 0 || *llmCfg.DefaultTemperature > 2) {
+		*errs = append(*errs, fmt.Sprintf("llm.default_temperature must be in [0.0, 2.0], got %g", *llmCfg.DefaultTemperature))
+	}
+	if llmCfg.DefaultMaxTokens != nil && *llmCfg.DefaultMaxTokens <= 0 {
+		*errs = append(*errs, fmt.Sprintf("llm.default_max_tokens must be positive, got %d", *llmCfg.DefaultMaxTokens))
+	}
+	if llmCfg.DefaultTimeout < 0 {
+		*errs = append(*errs, "llm.default_timeout must not be negative")
+	}
+}
+
+// ResolveActiveProvider returns the active ProviderEntry from the LLM config,
+// applying flag/env overrides for active selection, model, and API key.
+// Returns an error if no active provider can be determined.
+func (c *LLMConfig) ResolveActiveProvider() (*llm.ProviderEntry, error) {
+	if len(c.Providers) == 0 {
+		return nil, fmt.Errorf("config.ResolveActiveProvider: no providers configured")
+	}
+
+	name := c.ActiveProvider
+	if name == "" && len(c.Providers) == 1 {
+		name = c.Providers[0].Name
+	}
+	if name == "" {
+		return nil, fmt.Errorf("config.ResolveActiveProvider: no active provider configured")
+	}
+
+	for _, p := range c.Providers {
+		if p.Name == name {
+			entry := p // copy
+			if c.ModelOverride != "" {
+				entry.ModelName = c.ModelOverride
+			}
+			if c.APIKeyOverride != "" {
+				entry.APIKey = c.APIKeyOverride
+			}
+			return &entry, nil
+		}
+	}
+
+	return nil, fmt.Errorf("config.ResolveActiveProvider: provider %q not found", name)
+}
+
+// ActiveProviderName returns the resolved active provider name, considering
+// single-entry fallback. Returns empty string if unresolvable.
+func (c *LLMConfig) ActiveProviderName() string {
+	if c.ActiveProvider != "" {
+		return c.ActiveProvider
+	}
+	if len(c.Providers) == 1 {
+		return c.Providers[0].Name
+	}
+	return ""
+}
+
+// FindProvider returns the ProviderEntry with the given name, or nil if not found.
+func (c *LLMConfig) FindProvider(name string) *llm.ProviderEntry {
+	for i := range c.Providers {
+		if c.Providers[i].Name == name {
+			return &c.Providers[i]
+		}
+	}
 	return nil
 }

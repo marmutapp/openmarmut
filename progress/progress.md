@@ -84,9 +84,9 @@
 - [x] `internal/llm/factory.go` — RegisterType/NewProvider with ProviderEntry (defaults + credential resolution)
 - [x] `internal/llm/credentials.go` — ResolveCredential, ApplyAuth, DefaultAuthForType, DefaultEndpointURL
 - [x] `internal/llm/llm_test.go` — 20 tests: factory, credentials, auth, defaults
-- [ ] Config additions — `LLMConfig` with `[]ProviderEntry`, `active_provider`, validation
-- [ ] Config additions — FlagOverrides: `--provider`, `--model`, `--temperature`
-- [ ] Config additions — Active provider resolution logic (flag > env > config > single-entry)
+- [x] Config additions — `LLMConfig` with `[]ProviderEntry`, `active_provider`, validation
+- [x] Config additions — FlagOverrides: `--provider`, `--model`, `--temperature`
+- [x] Config additions — Active provider resolution logic (flag > env > config > single-entry)
 - [x] `internal/llm/openai/openai.go` — OpenAI wire format (streaming, tool calls, custom headers)
 - [x] `internal/llm/openai/openai_test.go` — 21 httptest-based unit tests
 - [x] `internal/llm/anthropic/anthropic.go` — Anthropic wire format (updated to ProviderEntry + ApplyAuth)
@@ -140,5 +140,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 7a | Provider interface + types + factory + ResolveAPIKey (internal/llm/llm.go). Anthropic provider fully implemented: SSE streaming, tool_use blocks, input_json_delta accumulation, system prompt extraction, tool result merging. 22 unit tests. | Continue Phase 7a: remaining providers + agent
 2026-03-13 | Phase 7 | Rewrote specs/llm-spec.md v2: provider type system (wire format abstraction), ProviderEntry/AuthConfig structs, multi-provider config with active_provider, credential env var references, custom endpoint support, `opencode providers` command. Updated progress.md Phase 7 checkboxes. | Continue Phase 7a: update llm.go to ProviderEntry, implement OpenAI wire format
 2026-03-13 | Phase 7a | Rewrote LLM package: types.go + factory.go + credentials.go replacing llm.go. ProviderEntry/AuthConfig, RegisterType/NewProvider factory with defaults+credential resolution, ApplyAuth helper. Updated Anthropic to ProviderEntry. Implemented OpenAI wire format: SSE streaming, tool call accumulation, custom headers. 57 total tests (20 llm + 16 anthropic + 21 openai). | Continue Phase 7a: config additions, agent loop, CLI commands
+2026-03-13 | Phase 7a | LLM config wired into internal/config: LLMConfig struct (Providers, ActiveProvider, DefaultTemperature, DefaultMaxTokens, DefaultTimeout), FlagOverrides (--provider, --model, --temperature), env vars (OPENCODE_LLM_PROVIDER/MODEL/API_KEY), validation, ResolveActiveProvider with override chain. 29 new tests (42 total config tests). | Continue Phase 7a: agent loop, CLI commands
 
 <!-- Claude: append a new line here after each working session -->
