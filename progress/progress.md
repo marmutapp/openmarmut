@@ -80,7 +80,7 @@
 
 ### Phase 7a: Foundation
 - [ ] `specs/llm-spec.md` — LLM integration specification ✅ (design complete)
-- [ ] `internal/llm/llm.go` — Provider interface, types, sentinel errors, factory
+- [x] `internal/llm/llm.go` — Provider interface, types, sentinel errors, factory, ResolveAPIKey
 - [ ] Config additions — `LLMConfig`, validation, env vars, CLI flags
 - [ ] `internal/llm/openai/openai.go` — OpenAI provider (streaming, tool calls)
 - [ ] `internal/llm/openai/openai_test.go` — httptest-based unit tests
@@ -93,8 +93,8 @@
 - [ ] Runner extension — `RunWithLLM` lifecycle method
 
 ### Phase 7b: Remaining Providers
-- [ ] `internal/llm/anthropic/anthropic.go` — Anthropic provider
-- [ ] `internal/llm/anthropic/anthropic_test.go`
+- [x] `internal/llm/anthropic/anthropic.go` — Anthropic provider (streaming, tool calls, SSE parsing)
+- [x] `internal/llm/anthropic/anthropic_test.go` — 16 httptest-based unit tests
 - [ ] `internal/llm/gemini/gemini.go` — Gemini provider
 - [ ] `internal/llm/gemini/gemini_test.go`
 - [ ] `internal/llm/ollama/ollama.go` — Ollama provider (local models)
@@ -129,5 +129,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 5 | DockerRuntime fully implemented: all 9 Runtime methods, dockerClient interface for testability, 40 unit tests (mocked), 16 integration tests (build-tagged). Base64 file I/O, stdcopy stream demux, container lifecycle, path sandboxing, shell quoting. | Start Phase 6: Integration & polish
 2026-03-13 | Phase 6 | Factory with init-registration pattern, CLI wired to both runtimes, Makefile, Dockerfile, README. All tests pass. | Start Phase 7: LLM integration
 2026-03-13 | Phase 7 | LLM integration spec complete (specs/llm-spec.md): Provider interface, 4 providers (OpenAI/Anthropic/Gemini/Ollama), agent loop, tool definitions, config, CLI commands, credential security. | Start Phase 7a implementation
+2026-03-13 | Phase 7a | Provider interface + types + factory + ResolveAPIKey (internal/llm/llm.go). Anthropic provider fully implemented: SSE streaming, tool_use blocks, input_json_delta accumulation, system prompt extraction, tool result merging. 22 unit tests. | Continue Phase 7a: remaining providers + agent
 
 <!-- Claude: append a new line here after each working session -->
