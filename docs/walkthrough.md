@@ -27,6 +27,7 @@ Usage:
   opencode [command]
 
 Available Commands:
+  ask         Ask the AI a question (single-turn, no tools)
   completion  Generate the autocompletion script for the specified shell
   delete      Delete a file
   exec        Execute a shell command
@@ -34,6 +35,7 @@ Available Commands:
   info        Show runtime information
   ls          List directory contents
   mkdir       Create a directory
+  providers   List configured LLM providers
   read        Read a file and print to stdout
   write       Write stdin to a file
 
@@ -43,7 +45,10 @@ Flags:
       --log-format string   log format: text/json
       --log-level string    log level: debug/info/warn/error
   -m, --mode string         runtime mode: "local" or "docker"
+      --model string        override model for the active LLM provider
+  -p, --provider string     LLM provider name
   -t, --target string       target directory (default: cwd)
+      --temperature float   sampling temperature (0.0–2.0)
 
 Use "opencode [command] --help" for more information about a command.
 ```
@@ -544,6 +549,181 @@ rm -rf "$DEMO_DIR"
 
 ---
 
+## 6. LLM Provider Usage
+
+### 6.1 Configure a provider
+
+Create a config file with an LLM section. Every provider needs a `name`, `type`
+(wire format), `model`, and typically an `api_key` referencing an environment
+variable:
+
+```bash
+export DEMO_DIR=$(mktemp -d)
+
+cat > "$DEMO_DIR/.opencode.yaml" << 'EOF'
+mode: local
+llm:
+  active_provider: my-claude
+  providers:
+    - name: my-claude
+      type: anthropic
+      model: claude-sonnet-4-20250514
+      api_key: "$ANTHROPIC_API_KEY"
+EOF
+```
+
+Supported types: `openai`, `anthropic`, `gemini`, `ollama`, `custom`.
+The `type` selects the wire format, not the hosting provider — use `type: openai`
+for Azure, Groq, Together, vLLM, or any OpenAI-compatible endpoint.
+
+### 6.2 List providers
+
+```bash
+./opencode -t "$DEMO_DIR" providers
+```
+
+Expected:
+
+```
+  NAME       TYPE       MODEL                     ENDPOINT
+* my-claude  anthropic  claude-sonnet-4-20250514  https://api.anthropic.com
+```
+
+The `*` marks the active provider. Default endpoints are filled in automatically
+when `endpoint_url` is omitted.
+
+### 6.3 Multi-provider setup
+
+```bash
+cat > "$DEMO_DIR/.opencode.yaml" << 'EOF'
+mode: local
+llm:
+  active_provider: claude
+  providers:
+    - name: claude
+      type: anthropic
+      model: claude-sonnet-4-20250514
+      api_key: "$ANTHROPIC_API_KEY"
+    - name: gpt
+      type: openai
+      model: gpt-4o
+      api_key: "$OPENAI_API_KEY"
+    - name: local
+      type: ollama
+      model: llama3.1
+EOF
+
+./opencode -t "$DEMO_DIR" providers
+```
+
+Expected:
+
+```
+  NAME    TYPE       MODEL                     ENDPOINT
+* claude  anthropic  claude-sonnet-4-20250514  https://api.anthropic.com
+  gpt     openai     gpt-4o                    https://api.openai.com
+  local   ollama     llama3.1                  http://localhost:11434
+```
+
+Switch the active provider with `--provider`:
+
+```bash
+./opencode -t "$DEMO_DIR" -p gpt providers
+```
+
+Expected — the `*` moves to `gpt`:
+
+```
+  NAME    TYPE       MODEL                     ENDPOINT
+  claude  anthropic  claude-sonnet-4-20250514  https://api.anthropic.com
+* gpt     openai     gpt-4o                    https://api.openai.com
+  local   ollama     llama3.1                  http://localhost:11434
+```
+
+### 6.4 Ask a question
+
+Requires a valid API key in the environment for the active provider:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+./opencode -t "$DEMO_DIR" ask "What is 2+2? Reply in one word."
+```
+
+Expected (streamed token-by-token):
+
+```
+Four.
+```
+
+Override the model on the fly:
+
+```bash
+./opencode -t "$DEMO_DIR" --model claude-haiku-4-5-20251001 ask "Say hello in one word."
+```
+
+### 6.5 Environment variable overrides
+
+```bash
+# Switch active provider via env var
+OPENCODE_LLM_PROVIDER=gpt ./opencode -t "$DEMO_DIR" providers
+
+# Override model via env var
+OPENCODE_LLM_MODEL=gpt-4o-mini ./opencode -t "$DEMO_DIR" ask "Say hi"
+
+# Override API key via env var (useful in CI)
+OPENCODE_LLM_API_KEY=sk-test-key ./opencode -t "$DEMO_DIR" ask "Hello"
+```
+
+Priority: flags > env vars > config file > single-entry fallback.
+
+### 6.6 Error cases
+
+Missing API key:
+
+```bash
+unset ANTHROPIC_API_KEY
+./opencode -t "$DEMO_DIR" ask "hello"
+```
+
+Expected (exit code 1):
+
+```
+ask: llm.NewProvider(my-claude): ResolveCredential: authentication failed — check API key: environment variable ANTHROPIC_API_KEY is not set
+```
+
+No providers configured:
+
+```bash
+./opencode ask "hello"
+```
+
+Expected (exit code 1):
+
+```
+ask: config.ResolveActiveProvider: no providers configured
+```
+
+Active provider not found:
+
+```bash
+./opencode -t "$DEMO_DIR" -p nonexistent ask "hello"
+```
+
+Expected (exit code 1):
+
+```
+ask: config.ResolveActiveProvider: provider "nonexistent" not found
+```
+
+### 6.7 Clean up
+
+```bash
+rm -rf "$DEMO_DIR"
+```
+
+---
+
 ## Summary
 
 | Feature | Command |
@@ -555,6 +735,10 @@ rm -rf "$DEMO_DIR"
 | Create dir | `opencode mkdir <path>` |
 | Run command | `opencode exec "<cmd>"` |
 | Runtime info | `opencode info` |
+| List providers | `opencode providers` |
+| Ask AI | `opencode ask "question"` |
 | Target dir | `-t /path` or `OPENCODE_TARGET_DIR` |
 | Docker mode | `-m docker` + config/env for image |
+| Select provider | `-p name` or `OPENCODE_LLM_PROVIDER` |
+| Override model | `--model name` or `OPENCODE_LLM_MODEL` |
 | Config file | `.opencode.yaml` in target dir |
