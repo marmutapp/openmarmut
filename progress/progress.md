@@ -73,8 +73,37 @@
 - [x] CLI runner updated to use factory (both modes supported)
 - [x] `internal/runtime/factory_test.go` — unknown mode test
 - [x] Makefile (build, test, lint, integration-test)
-- [x] Dockerfile (minimal ubuntu:24.04 for docker mode)
+- [x] Dockerfile (minimal ubuntu:20.04 for docker mode)
 - [x] README.md
+
+## Phase 7: LLM Integration
+
+### Phase 7a: Foundation
+- [ ] `specs/llm-spec.md` — LLM integration specification ✅ (design complete)
+- [ ] `internal/llm/llm.go` — Provider interface, types, sentinel errors, factory
+- [ ] Config additions — `LLMConfig`, validation, env vars, CLI flags
+- [ ] `internal/llm/openai/openai.go` — OpenAI provider (streaming, tool calls)
+- [ ] `internal/llm/openai/openai_test.go` — httptest-based unit tests
+- [ ] `internal/agent/agent.go` — Agent loop (observe→plan→act→verify)
+- [ ] `internal/agent/tools.go` — Tool registry mapping to Runtime methods
+- [ ] `internal/agent/agent_test.go` — Agent loop tests with mock provider
+- [ ] `internal/agent/security.go` — ContainsAPIKey, credential redaction
+- [ ] `internal/cli/ask.go` — `opencode ask "question"` single-shot command
+- [ ] `internal/cli/chat.go` — `opencode chat` interactive REPL
+- [ ] Runner extension — `RunWithLLM` lifecycle method
+
+### Phase 7b: Remaining Providers
+- [ ] `internal/llm/anthropic/anthropic.go` — Anthropic provider
+- [ ] `internal/llm/anthropic/anthropic_test.go`
+- [ ] `internal/llm/gemini/gemini.go` — Gemini provider
+- [ ] `internal/llm/gemini/gemini_test.go`
+- [ ] `internal/llm/ollama/ollama.go` — Ollama provider (local models)
+- [ ] `internal/llm/ollama/ollama_test.go`
+
+### Phase 7c: Polish
+- [ ] Context window management — token counting, history summarization
+- [ ] Retry logic — exponential backoff for rate limits
+- [ ] Cost tracking — token usage display
 
 ---
 
@@ -98,6 +127,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 3 | LocalRuntime fully implemented: all 8 methods + 44 tests. Atomic writes, path sandboxing, exit-code-not-error, process group kill on timeout. | Start Phase 4: CLI
 2026-03-13 | Phase 4 | CLI complete: root+runner+7 commands+main.go. Cobra-based with global flags, Runner lifecycle pattern. All smoke tests pass (read, write, delete, ls, mkdir, exec, info). | Start Phase 5: Docker runtime
 2026-03-13 | Phase 5 | DockerRuntime fully implemented: all 9 Runtime methods, dockerClient interface for testability, 40 unit tests (mocked), 16 integration tests (build-tagged). Base64 file I/O, stdcopy stream demux, container lifecycle, path sandboxing, shell quoting. | Start Phase 6: Integration & polish
-2026-03-13 | Phase 6 | Factory with init-registration pattern, CLI wired to both runtimes, Makefile, Dockerfile, README. All tests pass. Project complete. | Done
+2026-03-13 | Phase 6 | Factory with init-registration pattern, CLI wired to both runtimes, Makefile, Dockerfile, README. All tests pass. | Start Phase 7: LLM integration
+2026-03-13 | Phase 7 | LLM integration spec complete (specs/llm-spec.md): Provider interface, 4 providers (OpenAI/Anthropic/Gemini/Ollama), agent loop, tool definitions, config, CLI commands, credential security. | Start Phase 7a implementation
 
 <!-- Claude: append a new line here after each working session -->
