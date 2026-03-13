@@ -76,29 +76,38 @@
 - [x] Dockerfile (minimal ubuntu:20.04 for docker mode)
 - [x] README.md
 
-## Phase 7: LLM Integration
+## Phase 7: LLM Integration (Provider Type System)
 
 ### Phase 7a: Foundation
-- [ ] `specs/llm-spec.md` — LLM integration specification ✅ (design complete)
-- [x] `internal/llm/llm.go` — Provider interface, types, sentinel errors, factory, ResolveAPIKey
-- [ ] Config additions — `LLMConfig`, validation, env vars, CLI flags
-- [ ] `internal/llm/openai/openai.go` — OpenAI provider (streaming, tool calls)
+- [x] `specs/llm-spec.md` — LLM integration specification v2 (provider type system, custom endpoints)
+- [x] `internal/llm/llm.go` — Provider interface, types, sentinel errors (needs update to ProviderEntry)
+- [ ] `internal/llm/llm.go` — Update factory to RegisterType/NewProvider with ProviderEntry
+- [ ] `internal/llm/llm.go` — ProviderEntry, AuthConfig structs, ResolveCredential
+- [ ] `internal/llm/llm_test.go` — Update tests for new factory + credential resolution
+- [ ] Config additions — `LLMConfig` with `[]ProviderEntry`, `active_provider`, validation
+- [ ] Config additions — FlagOverrides: `--provider`, `--model`, `--temperature`
+- [ ] Config additions — Active provider resolution logic (flag > env > config > single-entry)
+- [ ] `internal/llm/openai/openai.go` — OpenAI wire format (streaming, tool calls)
 - [ ] `internal/llm/openai/openai_test.go` — httptest-based unit tests
+- [x] `internal/llm/anthropic/anthropic.go` — Anthropic wire format (needs update to ProviderEntry)
+- [ ] `internal/llm/anthropic/anthropic.go` — Update to accept ProviderEntry instead of ProviderConfig
+- [x] `internal/llm/anthropic/anthropic_test.go` — 16 httptest-based unit tests (update for ProviderEntry)
 - [ ] `internal/agent/agent.go` — Agent loop (observe→plan→act→verify)
 - [ ] `internal/agent/tools.go` — Tool registry mapping to Runtime methods
 - [ ] `internal/agent/agent_test.go` — Agent loop tests with mock provider
 - [ ] `internal/agent/security.go` — ContainsAPIKey, credential redaction
 - [ ] `internal/cli/ask.go` — `opencode ask "question"` single-shot command
 - [ ] `internal/cli/chat.go` — `opencode chat` interactive REPL
+- [ ] `internal/cli/providers.go` — `opencode providers` list command
 - [ ] Runner extension — `RunWithLLM` lifecycle method
 
-### Phase 7b: Remaining Providers
-- [x] `internal/llm/anthropic/anthropic.go` — Anthropic provider (streaming, tool calls, SSE parsing)
-- [x] `internal/llm/anthropic/anthropic_test.go` — 16 httptest-based unit tests
-- [ ] `internal/llm/gemini/gemini.go` — Gemini provider
+### Phase 7b: Remaining Wire Formats
+- [ ] `internal/llm/gemini/gemini.go` — Gemini wire format
 - [ ] `internal/llm/gemini/gemini_test.go`
-- [ ] `internal/llm/ollama/ollama.go` — Ollama provider (local models)
+- [ ] `internal/llm/ollama/ollama.go` — Ollama wire format
 - [ ] `internal/llm/ollama/ollama_test.go`
+- [ ] `internal/llm/custom/custom.go` — Custom JSON template wire format
+- [ ] `internal/llm/custom/custom_test.go`
 
 ### Phase 7c: Polish
 - [ ] Context window management — token counting, history summarization
@@ -130,5 +139,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 6 | Factory with init-registration pattern, CLI wired to both runtimes, Makefile, Dockerfile, README. All tests pass. | Start Phase 7: LLM integration
 2026-03-13 | Phase 7 | LLM integration spec complete (specs/llm-spec.md): Provider interface, 4 providers (OpenAI/Anthropic/Gemini/Ollama), agent loop, tool definitions, config, CLI commands, credential security. | Start Phase 7a implementation
 2026-03-13 | Phase 7a | Provider interface + types + factory + ResolveAPIKey (internal/llm/llm.go). Anthropic provider fully implemented: SSE streaming, tool_use blocks, input_json_delta accumulation, system prompt extraction, tool result merging. 22 unit tests. | Continue Phase 7a: remaining providers + agent
+2026-03-13 | Phase 7 | Rewrote specs/llm-spec.md v2: provider type system (wire format abstraction), ProviderEntry/AuthConfig structs, multi-provider config with active_provider, credential env var references, custom endpoint support, `opencode providers` command. Updated progress.md Phase 7 checkboxes. | Continue Phase 7a: update llm.go to ProviderEntry, implement OpenAI wire format
 
 <!-- Claude: append a new line here after each working session -->

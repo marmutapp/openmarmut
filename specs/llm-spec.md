@@ -1,8 +1,8 @@
 # OpenCode-Go: LLM Integration Specification
 
-**Version:** 1.0
+**Version:** 2.0
 **Last Updated:** 2026-03-13
-**Status:** Design Complete — Implementation Not Started
+**Status:** Design Complete — Implementation In Progress
 **Depends on:** specs/system-spec.md (Phases 1–6 complete)
 
 ---
@@ -13,6 +13,19 @@ Phase 7 adds AI model support to OpenCode-Go. An LLM reads the project via the
 existing `Runtime` interface, decides what operations to perform, and executes
 them through the same Runtime. The tool becomes an agentic coding assistant that
 works identically whether the underlying runtime is local or Docker.
+
+### Core Principle: There Are No Special Providers
+
+Every LLM connection is a **user-configured provider entry** with:
+
+- A **name** — an arbitrary identifier the user chooses (e.g., `"work-claude"`, `"local-llama"`, `"azure-gpt4"`)
+- A **type** — the wire format this endpoint speaks (`"openai"`, `"anthropic"`, `"gemini"`, `"ollama"`, `"custom"`)
+- An **endpoint URL** — where to send requests
+- A **model name** — what model to request
+- **Auth credentials** — how to authenticate
+- Optional **headers**, **payload config**, and **response path** for custom endpoints
+
+**Provider type means "what request/response format does this endpoint speak"**, NOT "who hosts it." Azure OpenAI, Groq, Together, Fireworks, vLLM, and any OpenAI-compatible endpoint all use `type: openai` with different URLs. A corporate proxy that wraps Anthropic uses `type: anthropic` with a custom URL.
 
 ### What Changes
 
@@ -39,7 +52,7 @@ After (Phase 7):
 ```
 ┌─────────────────────────────────────────────────────┐
 │                  CLI Layer (cmd/)                    │
-│  Existing commands + new: chat, ask                 │
+│  Existing commands + new: chat, ask, providers      │
 ├─────────────────────────────────────────────────────┤
 │               Agent Loop (agent/)                   │
 │  observe → plan → act → verify                      │
@@ -48,7 +61,7 @@ After (Phase 7):
 │  LLM Client  │         Runtime                      │
 │  (llm/)      │  (localrt/ or dockerrt/)             │
 │  Talks to    │  Executes file ops                   │
-│  AI provider │  and shell commands                  │
+│  any endpoint│  and shell commands                  │
 ├──────────────┴──────────────────────────────────────┤
 │              Shared Packages                        │
 │  config/ | logger/ | pathutil/ | runtime/           │
@@ -57,91 +70,189 @@ After (Phase 7):
 
 ### 2.2 Key Design Decisions
 
-**Decision 1: LLM client is provider-agnostic via interface.**
+**Decision 1: Provider type = wire format, not hosting provider.**
 
-A `Provider` interface abstracts all LLM APIs. Implementations are isolated in
-sub-packages. The agent loop never imports a provider directly.
+The `type` field on a provider entry controls which request/response codec is
+used. `type: openai` means "speak the OpenAI chat completions API." It says
+nothing about who runs the endpoint. Azure, Groq, Together, Fireworks, vLLM,
+LiteLLM, and localhost all use the same OpenAI wire format.
 
-**Decision 2: The agent loop is separate from the LLM client.**
+**Decision 2: Multiple named provider entries, one active.**
+
+Users define a list of providers in config. One is selected as active via
+`active_provider`. This allows switching between providers without editing
+config. The CLI flag `--provider` overrides `active_provider`.
+
+**Decision 3: Auth is explicit and configurable.**
+
+Each provider entry has an `AuthConfig` that specifies how credentials are
+sent: bearer token, custom header, query parameter, or none. No implicit
+auth guessing based on URL patterns.
+
+**Decision 4: Credential values are always env var references.**
+
+API keys in config are never literal values. They use `$VAR` or `env:VAR`
+syntax, resolved at validation time. This prevents accidental exposure in
+committed config files.
+
+**Decision 5: The agent loop is separate from the LLM client.**
 
 `internal/llm/` handles HTTP-level API communication.
 `internal/agent/` handles the observe→plan→act→verify loop, conversation
 history, and tool dispatch. This separation means the agent loop can be
 tested with a mock provider.
 
-**Decision 3: Tool calls map 1:1 to Runtime methods.**
+**Decision 6: Tool calls map 1:1 to Runtime methods.**
 
 The LLM sees tools named `read_file`, `write_file`, `list_dir`, `exec`, etc.
 Each tool call maps directly to a `Runtime` method. No intermediate abstraction.
 
-**Decision 4: Streaming by default.**
+**Decision 7: Streaming by default.**
 
 All providers stream responses token-by-token. This gives the user immediate
-feedback. Non-streaming is a degenerate case of streaming (single chunk).
+feedback. Non-streaming is a degenerate case (single chunk).
 
-**Decision 5: No agent autonomy limits in the spec.**
+**Decision 8: Custom type for unsupported wire formats.**
 
-The agent loop runs until the LLM emits a final text response with no tool
-calls. Iteration limits, cost caps, and confirmation prompts are
-implementation details for Phase 7b or later.
+The `custom` type provides a JSON template system for endpoints that don't
+speak any standard format. The user provides a request template and a
+response path to extract text.
 
 ---
 
-## 3. Provider Interface
+## 3. Provider Configuration
 
-### 3.1 Package: `internal/llm`
+### 3.1 Core Types
 
 ```go
 package llm
 
-import (
-    "context"
-)
+// ProviderEntry is a single named provider configuration.
+// Users define one or more of these in their config file.
+type ProviderEntry struct {
+    Name          string            `yaml:"name"`           // User-chosen identifier (e.g., "work-claude", "local-llama")
+    Type          string            `yaml:"type"`           // Wire format: "openai", "anthropic", "gemini", "ollama", "custom"
+    EndpointURL   string            `yaml:"endpoint_url"`   // Full base URL (e.g., "https://api.openai.com", "http://localhost:11434")
+    ModelName     string            `yaml:"model"`          // Model identifier sent in the request
+    APIKey        string            `yaml:"api_key"`        // Env var reference: "$OPENAI_API_KEY" or "env:MY_KEY"
+    Headers       map[string]string `yaml:"headers"`        // Extra HTTP headers (e.g., "api-version": "2024-02-01")
+    Auth          AuthConfig        `yaml:"auth"`           // How to authenticate requests
+    PayloadConfig json.RawMessage   `yaml:"payload_config"` // Type-specific overrides (custom type: full template)
+    ResponsePath  string            `yaml:"response_path"`  // JSONPath-like for custom type response extraction
+    Temperature   *float64          `yaml:"temperature"`    // Default temperature (nil = provider default)
+    MaxTokens     *int              `yaml:"max_tokens"`     // Default max tokens (nil = provider default)
+}
+
+// AuthConfig describes how to authenticate with an endpoint.
+type AuthConfig struct {
+    Type        string `yaml:"type"`         // "bearer", "header", "query", "none"
+    HeaderName  string `yaml:"header_name"`  // For "header" type: custom header name (e.g., "x-api-key")
+    TokenPrefix string `yaml:"token_prefix"` // For "bearer"/"header": prefix before the key (default: "Bearer " for bearer)
+    QueryParam  string `yaml:"query_param"`  // For "query" type: query parameter name (e.g., "key")
+}
+```
+
+### 3.2 Auth Type Semantics
+
+| Auth Type | Behavior | Example |
+|-----------|----------|---------|
+| `bearer` | `Authorization: {TokenPrefix} {resolved_key}` | OpenAI, Groq, Together, Azure |
+| `header` | `{HeaderName}: {TokenPrefix}{resolved_key}` | Anthropic (`x-api-key`) |
+| `query` | URL param `?{QueryParam}={resolved_key}` | Gemini (`key`) |
+| `none` | No auth sent | Ollama, local endpoints |
+
+**Defaults by provider type** (applied if `auth` is not explicitly set):
+
+| Type | Default Auth |
+|------|-------------|
+| `openai` | `{type: "bearer", token_prefix: "Bearer "}` |
+| `anthropic` | `{type: "header", header_name: "x-api-key"}` |
+| `gemini` | `{type: "query", query_param: "key"}` |
+| `ollama` | `{type: "none"}` |
+| `custom` | `{type: "none"}` |
+
+### 3.3 Credential Resolution
+
+API key values in config use env var references. Supported syntaxes:
+
+- `$VAR_NAME` — resolves to `os.Getenv("VAR_NAME")`
+- `env:VAR_NAME` — same behavior, explicit prefix
+- Empty string — no key (valid only for `auth.type: "none"`)
+
+Resolution happens at `Validate()` time. If the referenced env var is empty
+and auth type requires a key, validation fails with a clear error.
+
+```go
+// ResolveCredential resolves an env var reference to its value.
+// "$VAR" and "env:VAR" both resolve to os.Getenv("VAR").
+// Empty string returns empty string (valid for auth type "none").
+// Returns error if reference is set but env var is empty.
+func ResolveCredential(ref string) (string, error)
+```
+
+### 3.4 Type-Specific Defaults
+
+When `endpoint_url` is omitted, the following defaults apply:
+
+| Type | Default Endpoint URL |
+|------|---------------------|
+| `openai` | `https://api.openai.com` |
+| `anthropic` | `https://api.anthropic.com` |
+| `gemini` | `https://generativelanguage.googleapis.com` |
+| `ollama` | `http://localhost:11434` |
+| `custom` | *(required — no default)* |
+
+---
+
+## 4. Provider Interface
+
+### 4.1 Package: `internal/llm`
+
+```go
+package llm
+
+import "context"
 
 // Provider abstracts an LLM API. Implementations must be safe for sequential use.
 type Provider interface {
     // Complete sends a conversation to the model and streams the response.
-    // The callback is invoked for each chunk. The final Response is returned
-    // after the stream completes.
-    //
-    // If the response contains tool calls, they appear in Response.ToolCalls.
-    // The caller is responsible for executing tools and appending results
-    // before calling Complete again.
+    // The callback is invoked for each text chunk. The final Response is returned
+    // after the stream completes. Pass nil callback to skip streaming.
     Complete(ctx context.Context, req Request, cb StreamCallback) (*Response, error)
 
-    // Name returns the provider identifier (e.g., "openai", "anthropic").
+    // Name returns the user-assigned provider name (e.g., "work-claude").
     Name() string
 
-    // Model returns the model identifier being used (e.g., "gpt-4o", "claude-sonnet-4-20250514").
+    // Model returns the model identifier being used.
     Model() string
 }
 
 // StreamCallback is called for each token chunk during streaming.
-// text is the incremental text delta. Return a non-nil error to abort the stream.
+// Return a non-nil error to abort the stream.
 type StreamCallback func(text string) error
 
 // Request is a single completion request.
 type Request struct {
-    Messages   []Message
-    Tools      []ToolDef
-    Temperature *float64 // nil = provider default
-    MaxTokens  *int      // nil = provider default
+    Messages    []Message
+    Tools       []ToolDef
+    Temperature *float64 // nil = provider entry default
+    MaxTokens   *int     // nil = provider entry default
 }
 
 // Response is the result of a completion.
 type Response struct {
-    Content    string      // The text content of the response (may be empty if only tool calls)
-    ToolCalls  []ToolCall  // Zero or more tool invocations requested by the model
-    Usage      Usage       // Token counts
-    StopReason string      // "end", "tool_use", "max_tokens", "error"
+    Content    string     // Text content (may be empty if only tool calls)
+    ToolCalls  []ToolCall // Zero or more tool invocations requested by the model
+    Usage      Usage      // Token counts
+    StopReason string     // "end", "tool_use", "max_tokens"
 }
 
 // Message is a single message in the conversation.
 type Message struct {
     Role       Role
-    Content    string      // Text content (for user, assistant, system messages)
-    ToolCalls  []ToolCall  // Only for assistant messages that invoke tools
-    ToolCallID string      // Only for tool result messages — matches ToolCall.ID
+    Content    string     // Text content
+    ToolCalls  []ToolCall // Only for assistant messages that invoke tools
+    ToolCallID string     // Only for tool result messages — matches ToolCall.ID
 }
 
 // Role is the message sender.
@@ -156,7 +267,7 @@ const (
 
 // ToolCall is a request from the model to execute a tool.
 type ToolCall struct {
-    ID        string // Unique ID for this call (provider-assigned)
+    ID        string // Unique ID (provider-assigned)
     Name      string // Tool function name (e.g., "read_file")
     Arguments string // JSON-encoded arguments
 }
@@ -164,8 +275,8 @@ type ToolCall struct {
 // ToolDef describes a tool the model can invoke.
 type ToolDef struct {
     Name        string // Function name
-    Description string // What the tool does (shown to the model)
-    Parameters  any    // JSON Schema object describing the parameters
+    Description string // What the tool does
+    Parameters  any    // JSON Schema object for the parameters
 }
 
 // Usage tracks token consumption.
@@ -185,199 +296,271 @@ var (
 )
 ```
 
-### 3.2 Provider Factory
+### 4.2 Provider Factory
 
 ```go
 package llm
 
 import "log/slog"
 
-// ProviderConfig holds everything needed to create a provider.
-type ProviderConfig struct {
-    Name        string  // "openai", "anthropic", "gemini", "ollama"
-    Model       string  // e.g., "gpt-4o", "claude-sonnet-4-20250514"
-    APIKey      string  // Resolved key (never from a flag, never logged)
-    BaseURL     string  // Override for Ollama or proxies
-    Temperature *float64
-    MaxTokens   *int
-}
+// TypeConstructor creates a Provider from a ProviderEntry.
+// Each type ("openai", "anthropic", etc.) registers one of these.
+type TypeConstructor func(entry ProviderEntry, logger *slog.Logger) (Provider, error)
 
-// NewProvider creates a Provider from config.
-func NewProvider(cfg ProviderConfig, logger *slog.Logger) (Provider, error)
+var constructors = map[string]TypeConstructor{}
+
+// RegisterType adds a wire format constructor.
+func RegisterType(typeName string, ctor TypeConstructor)
+
+// NewProvider creates a Provider from a ProviderEntry using the registered constructor
+// for its type. Unknown types return an error.
+func NewProvider(entry ProviderEntry, logger *slog.Logger) (Provider, error) {
+    ctor, ok := constructors[entry.Type]
+    if !ok {
+        return nil, fmt.Errorf("llm.NewProvider: unknown provider type %q", entry.Type)
+    }
+    return ctor(entry, logger)
+}
 ```
 
-The factory switches on `cfg.Name` and returns the correct implementation.
-Unknown provider names return an error.
+Each wire format package registers itself via `init()`:
+
+```go
+// In internal/llm/openai/openai.go
+func init() {
+    llm.RegisterType("openai", func(entry llm.ProviderEntry, logger *slog.Logger) (llm.Provider, error) {
+        return New(entry, logger)
+    })
+}
+```
 
 ---
 
-## 4. Provider Implementations
+## 5. Wire Format Implementations
 
-### 4.1 Package Structure
+### 5.1 Package Structure
 
 ```
 internal/llm/
-  llm.go              — Provider interface, types, factory, sentinel errors
+  llm.go              — Provider interface, types, factory, credential resolution, sentinel errors
+  llm_test.go         — Factory tests, credential resolution tests
   openai/
-    openai.go         — OpenAI implementation (GPT-4o, GPT-4o-mini, o1, etc.)
+    openai.go         — OpenAI wire format (also: Azure, Groq, Together, Fireworks, vLLM)
     openai_test.go
   anthropic/
-    anthropic.go      — Anthropic implementation (Claude 4 Sonnet, Claude 4 Opus, etc.)
+    anthropic.go      — Anthropic Messages API wire format
     anthropic_test.go
   gemini/
-    gemini.go         — Google Gemini implementation
+    gemini.go         — Google Gemini wire format
     gemini_test.go
   ollama/
-    ollama.go         — Ollama local model implementation
+    ollama.go         — Ollama native API wire format
     ollama_test.go
+  custom/
+    custom.go         — Custom JSON template wire format
+    custom_test.go
 ```
 
-### 4.2 OpenAI (`internal/llm/openai`)
+### 5.2 OpenAI Wire Format (`internal/llm/openai`)
 
-- **API:** `POST https://api.openai.com/v1/chat/completions`
-- **Auth:** `Authorization: Bearer $OPENAI_API_KEY`
-- **Streaming:** SSE via `stream: true`, parse `data: {...}` lines
-- **Tool calls:** Use `tools` field with `type: "function"`, parse `tool_calls` in response
-- **Models:** `gpt-4o`, `gpt-4o-mini`, `o1`, `o1-mini`
-- **Base URL override:** Configurable for Azure OpenAI or proxies
+Speaks the OpenAI Chat Completions API. Used by:
+- OpenAI direct
+- Azure OpenAI (different URL, extra header `api-version`)
+- Groq, Together, Fireworks (different URLs)
+- vLLM, LiteLLM, text-generation-inference (different URLs)
+- Any OpenAI-compatible endpoint
+
+**Request path:** `{endpoint_url}/v1/chat/completions`
 
 **Request mapping:**
 
-| llm.Request field | OpenAI field |
-|-------------------|-------------|
-| Messages | messages (role mapping: system→system, user→user, assistant→assistant, tool→tool) |
-| Tools | tools (type: "function", function: {name, description, parameters}) |
-| Temperature | temperature |
-| MaxTokens | max_tokens |
+| ProviderEntry field | OpenAI API field |
+|---------------------|-----------------|
+| `ModelName` | `model` |
+| `Temperature` | `temperature` |
+| `MaxTokens` | `max_tokens` |
+| Request.Messages | `messages` (role mapping: system→system, user→user, assistant→assistant, tool→tool) |
+| Request.Tools | `tools` (type: "function", function: {name, description, parameters}) |
 
-### 4.3 Anthropic (`internal/llm/anthropic`)
+**Auth applied:** Per AuthConfig (default: `Authorization: Bearer <key>`)
 
-- **API:** `POST https://api.anthropic.com/v1/messages`
-- **Auth:** `x-api-key: $ANTHROPIC_API_KEY` header
-- **Streaming:** SSE via `stream: true`, parse event types: `content_block_delta`, `message_stop`, etc.
-- **Tool calls:** Use `tools` field, model returns `tool_use` content blocks
-- **Models:** `claude-sonnet-4-20250514`, `claude-opus-4-20250514`, `claude-haiku-4-5-20251001`
-- **System message:** Separate `system` field (not in messages array)
+**Streaming:** SSE via `stream: true`, parse `data: {...}` lines, `data: [DONE]` terminates.
+
+**Tool calls:** Parse `tool_calls` array in assistant delta chunks. Accumulate `function.arguments`
+across multiple deltas (they arrive in fragments).
+
+### 5.3 Anthropic Wire Format (`internal/llm/anthropic`)
+
+Speaks the Anthropic Messages API.
+
+**Request path:** `{endpoint_url}/v1/messages`
+
+**Extra required header:** `anthropic-version: 2023-06-01`
 
 **Key differences from OpenAI:**
+- System prompt is a top-level `system` field, not in the messages array
+- Tool results are `tool_result` content blocks inside user messages
+- Tool calls arrive as `tool_use` content blocks
+- Input arguments arrive as `input_json_delta` events (accumulated incrementally)
+- Auth default: `x-api-key: <key>` header (not Bearer)
 
-- System prompt is a top-level field, not a message
-- Tool results are sent as `tool_result` content blocks in user messages
-- Each tool call has an `id`; tool results must reference it
-- Anthropic-specific header: `anthropic-version: 2023-06-01`
+**Streaming:** SSE with event types: `message_start`, `content_block_start`,
+`content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`.
 
-### 4.4 Gemini (`internal/llm/gemini`)
+### 5.4 Gemini Wire Format (`internal/llm/gemini`)
 
-- **API:** `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent`
-- **Auth:** `?key=$GOOGLE_API_KEY` query parameter
-- **Streaming:** JSON streaming (chunked responses)
-- **Tool calls:** `functionDeclarations` in `tools`, model returns `functionCall` parts
-- **Models:** `gemini-2.5-pro`, `gemini-2.5-flash`
+Speaks the Google Generative Language API.
 
-**Key differences:**
-
-- Auth via query parameter, not header
-- Tool definitions use `functionDeclarations` schema (similar to but not identical to JSON Schema)
-- Content blocks use `parts` array with different part types
-
-### 4.5 Ollama (`internal/llm/ollama`)
-
-- **API:** `POST http://localhost:11434/api/chat` (OpenAI-compatible endpoint also available)
-- **Auth:** None (local server)
-- **Streaming:** NDJSON (newline-delimited JSON), each line is a response chunk
-- **Tool calls:** Supported via `tools` field (same schema as OpenAI)
-- **Models:** Any model installed locally (e.g., `llama3.1`, `codellama`, `deepseek-coder`)
-- **Base URL:** Configurable (default `http://localhost:11434`)
+**Request path:** `{endpoint_url}/v1beta/models/{model}:streamGenerateContent`
 
 **Key differences:**
+- Auth default: query parameter `?key=<key>`
+- Uses `contents` array with `parts` (not `messages`)
+- Tool definitions use `functionDeclarations` in `tools`
+- Tool calls arrive as `functionCall` parts
+- Streaming: chunked JSON responses (not SSE)
 
-- No authentication required
-- Base URL must be configurable (user may run Ollama on a different host/port)
-- Model must be pre-pulled (`ollama pull <model>`)
-- Tool support varies by model — some models don't support function calling
+### 5.5 Ollama Wire Format (`internal/llm/ollama`)
+
+Speaks the Ollama native chat API.
+
+**Request path:** `{endpoint_url}/api/chat`
+
+**Key differences:**
+- Auth default: none (local server)
+- Streaming: NDJSON (newline-delimited JSON), each line is a response chunk
+- Tool support via `tools` field (same schema as OpenAI)
+- Model must be pre-pulled
+
+### 5.6 Custom Wire Format (`internal/llm/custom`)
+
+For endpoints that don't speak any standard format. Requires:
+- `endpoint_url` (mandatory)
+- `payload_config` — JSON template with `{{model}}`, `{{messages}}`, `{{temperature}}` placeholders
+- `response_path` — dot-notation path to extract text from response (e.g., `"result.text"`, `"choices.0.message.content"`)
+
+**Limitations:**
+- No streaming (single request/response)
+- No tool call support (text-only responses)
+- Primarily for simple completion endpoints
+
+```yaml
+providers:
+  - name: corp-internal
+    type: custom
+    endpoint_url: https://internal.corp.com/v1/complete
+    model: internal-7b
+    api_key: "$CORP_API_KEY"
+    auth:
+      type: bearer
+    payload_config: |
+      {
+        "model": "{{model}}",
+        "prompt": "{{messages_text}}",
+        "max_tokens": {{max_tokens}},
+        "temperature": {{temperature}}
+      }
+    response_path: "output.text"
+```
 
 ---
 
-## 5. Configuration
+## 6. Configuration
 
-### 5.1 Config Additions
+### 6.1 Config Additions
 
 ```go
 // Added to config.Config
 type Config struct {
-    // ... existing fields ...
+    // ... existing fields (Mode, TargetDir, Docker, Log, DefaultTimeout) ...
     LLM LLMConfig `yaml:"llm"`
 }
 
-// LLMConfig holds LLM provider settings.
+// LLMConfig holds all LLM provider configuration.
 type LLMConfig struct {
-    Provider    string   `yaml:"provider"`     // "openai", "anthropic", "gemini", "ollama"
-    Model       string   `yaml:"model"`        // Provider-specific model ID
-    APIKeyEnv   string   `yaml:"api_key_env"`  // Env var name holding the key (default: auto)
-    BaseURL     string   `yaml:"base_url"`     // Override API endpoint (for Ollama, proxies)
-    Temperature *float64 `yaml:"temperature"`  // nil = provider default
-    MaxTokens   *int     `yaml:"max_tokens"`   // nil = provider default
-    SystemPrompt string  `yaml:"system_prompt"` // Custom system prompt (optional override)
+    Providers      []ProviderEntry `yaml:"providers"`       // All configured provider entries
+    ActiveProvider string          `yaml:"active_provider"` // Name of the provider to use
+    SystemPrompt   string          `yaml:"system_prompt"`   // Custom system prompt (optional override)
 }
 ```
 
-### 5.2 API Key Resolution
+Note: `ProviderEntry` and `AuthConfig` are defined in `internal/llm` but
+embedded in config via YAML tags. The config package imports `llm` types
+for deserialization. Alternatively, config can define its own mirror structs
+and convert to `llm.ProviderEntry` during `Load()` — this avoids the
+circular dependency if `llm` ever needs to import `config`.
 
-Keys are **never** stored directly in config. The resolution order is:
-
-1. Environment variable named in `LLMConfig.APIKeyEnv` (explicit override)
-2. Standard environment variable for the provider:
-   - OpenAI: `OPENAI_API_KEY`
-   - Anthropic: `ANTHROPIC_API_KEY`
-   - Gemini: `GOOGLE_API_KEY`
-   - Ollama: (no key needed)
-3. If neither is set and provider requires auth → return `ErrAuthFailed`
-
-```go
-// ResolveAPIKey returns the API key for the configured provider.
-// Returns empty string for providers that don't need auth (ollama).
-// Returns error if key is required but not found.
-func ResolveAPIKey(cfg LLMConfig) (string, error)
-```
-
-### 5.3 Environment Variables
+### 6.2 Environment Variables
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENCODE_LLM_PROVIDER` | Provider name |
-| `OPENCODE_LLM_MODEL` | Model identifier |
-| `OPENCODE_LLM_BASE_URL` | Base URL override |
+| `OPENCODE_LLM_PROVIDER` | Override active_provider |
 | `OPENAI_API_KEY` | OpenAI API key (standard) |
 | `ANTHROPIC_API_KEY` | Anthropic API key (standard) |
 | `GOOGLE_API_KEY` | Google Gemini API key (standard) |
 
-Note: API key env vars use the standard names established by each provider,
-not `OPENCODE_`-prefixed names. This matches ecosystem conventions and avoids
-requiring users to duplicate keys.
+API key env vars use the standard names established by each provider.
+Provider entries reference them via `$VAR` syntax.
 
-### 5.4 FlagOverrides Additions
+### 6.3 FlagOverrides Additions
 
 ```go
 // Added to config.FlagOverrides
 type FlagOverrides struct {
     // ... existing fields ...
-    LLMProvider    *string
-    LLMModel       *string
-    LLMTemperature *float64
+    LLMProvider    *string  // --provider flag → overrides active_provider
+    LLMModel       *string  // --model flag → overrides active provider's model
+    LLMTemperature *float64 // --temperature flag
 }
 ```
 
-### 5.5 Config File Examples
+### 6.4 Config File Examples
 
-**OpenAI:**
+**Standard OpenAI:**
 
 ```yaml
 mode: local
 llm:
-  provider: openai
-  model: gpt-4o
-  temperature: 0.2
-  max_tokens: 4096
+  active_provider: openai
+  providers:
+    - name: openai
+      type: openai
+      model: gpt-4o
+      api_key: "$OPENAI_API_KEY"
+      temperature: 0.2
+      max_tokens: 4096
+```
+
+**Azure OpenAI:**
+
+```yaml
+mode: local
+llm:
+  active_provider: azure
+  providers:
+    - name: azure
+      type: openai
+      endpoint_url: https://my-resource.openai.azure.com
+      model: gpt-4o
+      api_key: "$AZURE_OPENAI_API_KEY"
+      headers:
+        api-version: "2024-08-01-preview"
+      auth:
+        type: bearer
+```
+
+**Groq (OpenAI-compatible):**
+
+```yaml
+mode: local
+llm:
+  active_provider: groq
+  providers:
+    - name: groq
+      type: openai
+      endpoint_url: https://api.groq.com/openai
+      model: llama-3.3-70b-versatile
+      api_key: "$GROQ_API_KEY"
 ```
 
 **Anthropic:**
@@ -385,52 +568,124 @@ llm:
 ```yaml
 mode: local
 llm:
-  provider: anthropic
-  model: claude-sonnet-4-20250514
-  temperature: 0.3
+  active_provider: claude
+  providers:
+    - name: claude
+      type: anthropic
+      model: claude-sonnet-4-20250514
+      api_key: "$ANTHROPIC_API_KEY"
+      temperature: 0.3
 ```
 
-**Ollama (local):**
+**Local Ollama:**
 
 ```yaml
 mode: local
 llm:
-  provider: ollama
-  model: llama3.1
-  base_url: http://localhost:11434
+  active_provider: local
+  providers:
+    - name: local
+      type: ollama
+      model: llama3.1
 ```
 
-**Docker + Gemini:**
+**Self-hosted vLLM:**
 
 ```yaml
-mode: docker
-docker:
-  image: opencode-sandbox
+mode: local
 llm:
-  provider: gemini
-  model: gemini-2.5-pro
+  active_provider: vllm
+  providers:
+    - name: vllm
+      type: openai
+      endpoint_url: http://gpu-box.internal:8000
+      model: codellama-34b
+      auth:
+        type: none
 ```
 
-### 5.6 Validation
+**Corporate custom endpoint:**
 
-The following rules apply when `chat` or `ask` commands are used:
+```yaml
+mode: local
+llm:
+  active_provider: corp
+  providers:
+    - name: corp
+      type: custom
+      endpoint_url: https://llm.internal.corp.com/v1/complete
+      model: internal-7b
+      api_key: "$CORP_API_KEY"
+      auth:
+        type: bearer
+      payload_config: |
+        {
+          "model": "{{model}}",
+          "prompt": "{{messages_text}}",
+          "max_tokens": {{max_tokens}}
+        }
+      response_path: "output.text"
+```
 
-- `llm.provider` must be one of: `openai`, `anthropic`, `gemini`, `ollama`
-- `llm.model` must be non-empty
-- API key must resolve for providers that require one
-- `llm.temperature`, if set, must be in `[0.0, 2.0]`
-- `llm.max_tokens`, if set, must be positive
+**Multi-provider setup (switch between providers):**
+
+```yaml
+mode: local
+llm:
+  active_provider: claude
+  providers:
+    - name: claude
+      type: anthropic
+      model: claude-sonnet-4-20250514
+      api_key: "$ANTHROPIC_API_KEY"
+    - name: gpt
+      type: openai
+      model: gpt-4o
+      api_key: "$OPENAI_API_KEY"
+    - name: local
+      type: ollama
+      model: llama3.1
+```
+
+Usage: `opencode ask --provider gpt "explain this code"` overrides active_provider.
+
+### 6.5 Validation
+
+When `chat`, `ask`, or `providers` commands are used:
+
+1. `llm.providers` must have at least one entry
+2. `llm.active_provider` must match the `name` of one entry (or be overridden by `--provider`)
+3. Each provider entry:
+   - `name` must be non-empty and unique within the list
+   - `type` must be one of: `openai`, `anthropic`, `gemini`, `ollama`, `custom`
+   - `model` must be non-empty
+   - `api_key` env var reference must resolve if `auth.type` requires a key
+   - `temperature`, if set, must be in `[0.0, 2.0]`
+   - `max_tokens`, if set, must be positive
+   - If `type` is `custom`: `endpoint_url`, `payload_config`, and `response_path` are required
+4. `endpoint_url`, if set, must be a valid URL
+5. Non-localhost endpoints must use HTTPS (except for `auth.type: "none"`)
 
 LLM validation is **skipped** for non-LLM commands (`read`, `write`, `exec`,
 etc.) so the tool continues to work without any LLM configuration.
 
+### 6.6 Active Provider Resolution
+
+```
+1. If --provider flag set → find entry by name → error if not found
+2. Else if OPENCODE_LLM_PROVIDER env var set → find entry by name
+3. Else use llm.active_provider from config
+4. If still empty and providers list has exactly 1 entry → use it
+5. If still empty → error: "no active provider configured"
+```
+
 ---
 
-## 6. Tool Definitions
+## 7. Tool Definitions
 
 The agent exposes Runtime methods as tools the LLM can call.
 
-### 6.1 Tool Registry
+### 7.1 Tool Registry
 
 ```go
 package agent
@@ -445,18 +700,18 @@ type Tool struct {
 func DefaultTools() []Tool
 ```
 
-### 6.2 Tool Definitions
+### 7.2 Tool Definitions
 
 | Tool Name | Parameters | Maps To | Returns |
 |-----------|-----------|---------|---------|
-| `read_file` | `{"path": "string"}` | `rt.ReadFile(ctx, path)` | File contents as string (truncated at 100KB with warning) |
+| `read_file` | `{"path": "string"}` | `rt.ReadFile(ctx, path)` | File contents (truncated at 100KB with warning) |
 | `write_file` | `{"path": "string", "content": "string"}` | `rt.WriteFile(ctx, path, []byte(content), 0644)` | `"wrote N bytes to <path>"` |
 | `delete_file` | `{"path": "string"}` | `rt.DeleteFile(ctx, path)` | `"deleted <path>"` |
 | `list_dir` | `{"path": "string"}` | `rt.ListDir(ctx, path)` | JSON array of entries |
 | `mkdir` | `{"path": "string"}` | `rt.MkDir(ctx, path, 0755)` | `"created directory <path>"` |
 | `exec` | `{"command": "string", "workdir": "string?"}` | `rt.Exec(ctx, command, opts)` | JSON with stdout, stderr, exit_code |
 
-### 6.3 Tool Argument Schemas (JSON Schema)
+### 7.3 Tool Argument Schemas (JSON Schema)
 
 ```json
 {
@@ -509,9 +764,9 @@ func DefaultTools() []Tool
 
 ---
 
-## 7. Agent Loop
+## 8. Agent Loop
 
-### 7.1 Package: `internal/agent`
+### 8.1 Package: `internal/agent`
 
 ```go
 package agent
@@ -556,7 +811,7 @@ type Step struct {
 }
 ```
 
-### 7.2 Agentic Loop Flow
+### 8.2 Agentic Loop Flow
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -589,7 +844,7 @@ type Step struct {
 └──────────────────────────────────────────────────────┘
 ```
 
-### 7.3 System Prompt
+### 8.3 System Prompt
 
 The default system prompt is injected as the first message:
 
@@ -607,24 +862,25 @@ Rules:
 - Use exec to run build commands, tests, and linters.
 - Explain what you are doing and why before each action.
 - If a command fails, analyze the error and try a different approach.
+- Never include API keys, secrets, or credentials in tool call arguments.
 ```
 
 The system prompt can be overridden via `llm.system_prompt` in config.
 
-### 7.4 Conversation History Management
+### 8.4 Conversation History Management
 
 History grows unboundedly during a session. For long conversations:
 
 - The agent tracks total token usage via `Response.Usage`
 - When total tokens approach the model's context limit (provider-specific),
   the agent summarizes older messages into a condensed system message
-- This is a Phase 7b optimization — initial implementation keeps full history
+- This is a Phase 7c optimization — initial implementation keeps full history
 
 ---
 
-## 8. CLI Commands
+## 9. CLI Commands
 
-### 8.1 `opencode ask "question"`
+### 9.1 `opencode ask "question"`
 
 Single-shot mode. Sends one message, runs the agent loop, prints the result, exits.
 
@@ -652,27 +908,10 @@ func newAskCmd(runner *Runner) *cobra.Command {
 }
 ```
 
-### 8.2 `opencode chat`
+### 9.2 `opencode chat`
 
-Interactive REPL mode. Reads user input line-by-line, runs the agent loop for
-each input, prints streaming output. The conversation persists across turns.
-
-```go
-func newChatCmd(runner *Runner) *cobra.Command {
-    return &cobra.Command{
-        Use:   "chat",
-        Short: "Start an interactive AI chat session",
-        Args:  cobra.NoArgs,
-        RunE: func(cmd *cobra.Command, args []string) error {
-            return runner.RunWithLLM(cmd.Context(), func(ctx context.Context, rt runtime.Runtime, agent *agent.Agent) error {
-                return runChatLoop(ctx, agent)
-            })
-        },
-    }
-}
-```
-
-The chat loop:
+Interactive REPL mode. Reads user input, runs the agent loop for each input,
+prints streaming output. Conversation persists across turns.
 
 ```
 1. Print prompt (e.g., "you> ")
@@ -682,49 +921,59 @@ The chat loop:
 5. Print newline, go to 1
 ```
 
-### 8.3 New Global Flags
+### 9.3 `opencode providers`
+
+Lists all configured providers and indicates which is active.
 
 ```
---provider, -p   LLM provider: openai/anthropic/gemini/ollama
---model          Model identifier (e.g., gpt-4o, claude-sonnet-4-20250514)
+$ opencode providers
+  NAME          TYPE        MODEL                     ENDPOINT
+* claude        anthropic   claude-sonnet-4-20250514  https://api.anthropic.com
+  gpt           openai      gpt-4o                    https://api.openai.com
+  local         ollama      llama3.1                  http://localhost:11434
+```
+
+The `*` marks the active provider. This command validates all provider
+entries and reports configuration errors.
+
+### 9.4 New Global Flags
+
+```
+--provider, -p   Select provider by name (overrides active_provider)
+--model          Override active provider's model
 --temperature    Sampling temperature (0.0–2.0)
 ```
 
-### 8.4 Runner Extension
+### 9.5 Runner Extension
 
 The existing `Runner.Run` stays unchanged for non-LLM commands. A new method
 handles the LLM lifecycle:
 
 ```go
 // RunWithLLM extends Run with LLM provider initialization.
-// Lifecycle: config → logger → runtime.Init → provider.New → agent.New → fn → runtime.Close
+// Lifecycle: config → logger → runtime.Init → resolve active provider →
+//            ResolveCredential → NewProvider → agent.New → fn → runtime.Close
 func (r *Runner) RunWithLLM(ctx context.Context, fn func(ctx context.Context, rt runtime.Runtime, a *agent.Agent) error) error
 ```
 
 ---
 
-## 9. Credential Security
+## 10. Credential Security
 
-### 9.1 Rules
+### 10.1 Rules
 
-1. **Keys from env vars or config `api_key_env` only.** No `--api-key` flag. No
-   hardcoded strings. The config file stores the *name* of the env var, not the key.
+1. **Keys from env var references only.** No `--api-key` flag. No hardcoded
+   strings. Config stores `"$VAR_NAME"`, not the key itself.
 
-2. **Keys never logged.** The logger must never receive an API key as a value.
-   Provider implementations must not include keys in `fmt.Errorf` messages.
-   Use `"[REDACTED]"` if key presence needs to be indicated.
+2. **Keys never logged.** Provider implementations must not include keys in
+   `fmt.Errorf` messages or slog fields. Use `"[REDACTED]"` if key presence
+   needs to be indicated.
 
-3. **Keys never in command output.** If a user accidentally passes an API key
-   as part of a command (e.g., `opencode exec "curl -H 'Authorization: Bearer sk-...'"`,
-   the runtime does not prevent this — but the agent's system prompt must
-   instruct the model to never include secrets in tool call arguments.
-
-4. **Keys redacted in exec commands.** Before executing any `exec` tool call
-   from the LLM, the agent scans the command string for patterns matching known
-   API key formats and refuses execution if found:
+3. **Keys redacted in exec commands.** Before executing any `exec` tool call
+   from the LLM, the agent scans the command string for patterns matching
+   known API key formats and refuses execution if found:
 
 ```go
-// redactedKeyPatterns are regexes that match known API key formats.
 var redactedKeyPatterns = []*regexp.Regexp{
     regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`),           // OpenAI
     regexp.MustCompile(`sk-ant-[a-zA-Z0-9]{20,}`),       // Anthropic
@@ -735,22 +984,22 @@ var redactedKeyPatterns = []*regexp.Regexp{
 func ContainsAPIKey(s string) bool
 ```
 
-5. **HTTP transport.** All providers (except Ollama on localhost) must use HTTPS.
-   The provider must validate the base URL scheme.
+4. **HTTPS required.** All non-localhost endpoints must use HTTPS. Provider
+   constructors validate the URL scheme.
 
-### 9.2 Implementation Checklist
+### 10.2 Implementation Checklist
 
-- [ ] `ResolveAPIKey` never returns the key in error messages
+- [ ] `ResolveCredential` never returns the key in error messages
 - [ ] Logger calls in provider code never include the key
 - [ ] `Agent.Run` checks `ContainsAPIKey` on exec tool call arguments
 - [ ] Provider constructors validate HTTPS for non-localhost URLs
-- [ ] Config file example shows `api_key_env`, never a raw key
+- [ ] Config file examples show `$VAR` references, never raw keys
 
 ---
 
-## 10. Dependencies
+## 11. Dependencies
 
-### 10.1 New Dependencies
+### 11.1 New Dependencies
 
 | Dependency | Purpose |
 |-----------|---------|
@@ -759,27 +1008,22 @@ func ContainsAPIKey(s string) bool
 | `bufio` (stdlib) | SSE stream parsing, chat REPL input |
 | `regexp` (stdlib) | API key pattern detection |
 
-No external HTTP client library. The standard `net/http` is sufficient for
-all four providers. SSE parsing is straightforward (read lines, strip `data: `
-prefix, unmarshal JSON).
-
-### 10.2 No SDK Dependencies
+### 11.2 No SDK Dependencies
 
 Provider implementations use raw HTTP, not vendor SDKs. Rationale:
 
-- Avoids four separate SDK dependencies with their own transitive trees
-- All four APIs are simple REST+JSON+SSE — no complex protocol negotiation
+- Avoids five separate SDK dependencies with their own transitive trees
+- All APIs are simple REST+JSON+SSE — no complex protocol negotiation
 - Gives full control over streaming, retries, and error handling
 - Keeps the binary small
 
 ---
 
-## 11. Testing Strategy
+## 12. Testing Strategy
 
-### 11.1 Unit Tests
+### 12.1 Unit Tests
 
-Each provider gets a test file with an `httptest.Server` that replays
-canned responses:
+Each wire format gets a test file with `httptest.Server` replaying canned responses:
 
 ```go
 func TestOpenAI_Complete_Success(t *testing.T) {
@@ -788,34 +1032,24 @@ func TestOpenAI_Complete_Success(t *testing.T) {
     }))
     defer srv.Close()
 
-    p, _ := openai.New(llm.ProviderConfig{
-        Model:   "gpt-4o",
-        APIKey:  "test-key",
-        BaseURL: srv.URL,
-    }, testLogger)
+    entry := llm.ProviderEntry{
+        Name:        "test",
+        Type:        "openai",
+        EndpointURL: srv.URL,
+        ModelName:   "gpt-4o",
+        APIKey:      "",  // No auth needed for test server
+        Auth:        llm.AuthConfig{Type: "none"},
+    }
+    p, _ := openai.New(entry, testLogger)
 
     resp, err := p.Complete(ctx, req, nil)
     // Assert response fields
 }
 ```
 
-### 11.2 Agent Loop Tests
+### 12.2 Agent Loop Tests
 
-The agent loop is tested with a mock `Provider` that returns scripted
-sequences of tool calls and final responses:
-
-```go
-type mockProvider struct {
-    responses []llm.Response
-    callIndex int
-}
-
-func (m *mockProvider) Complete(ctx context.Context, req llm.Request, cb llm.StreamCallback) (*llm.Response, error) {
-    resp := m.responses[m.callIndex]
-    m.callIndex++
-    return &resp, nil
-}
-```
+Tested with a mock `Provider` that returns scripted responses:
 
 Test cases:
 - Single-turn: user asks, model responds with text only
@@ -824,7 +1058,7 @@ Test cases:
 - Multiple tool calls in one turn: model calls list_dir + read_file
 - Credential leak prevention: model tries to exec a command with an API key
 
-### 11.3 Integration Tests
+### 12.3 Integration Tests
 
 Gated by `//go:build integration && llm`:
 
@@ -833,27 +1067,33 @@ Gated by `//go:build integration && llm`:
 
 ---
 
-## 12. Implementation Order
+## 13. Implementation Order
 
 ```
 Phase 7a: Foundation
-  1. internal/llm/llm.go           — interfaces, types, errors, factory stub
-  2. config additions              — LLMConfig, validation, env vars, flags
-  3. internal/llm/openai/          — first provider (most common)
-  4. internal/agent/               — agent loop, tool registry, system prompt
-  5. internal/cli/ask.go           — single-shot command
-  6. internal/cli/chat.go          — interactive REPL
-  7. Credential security module    — ContainsAPIKey, ResolveAPIKey
+  1. internal/llm/llm.go           — Provider interface, types, factory (RegisterType/NewProvider),
+                                      ProviderEntry, AuthConfig, ResolveCredential, sentinel errors
+  2. Config additions              — LLMConfig with []ProviderEntry, active_provider, validation,
+                                      env vars, CLI flags (--provider, --model, --temperature)
+  3. internal/llm/openai/          — OpenAI wire format (streaming, tool calls)
+  4. internal/llm/anthropic/       — Anthropic wire format (already started — update to ProviderEntry)
+  5. internal/agent/agent.go       — Agent loop (observe→plan→act→verify)
+  6. internal/agent/tools.go       — Tool registry mapping to Runtime methods
+  7. internal/agent/security.go    — ContainsAPIKey, credential redaction
+  8. internal/cli/ask.go           — Single-shot command
+  9. internal/cli/chat.go          — Interactive REPL
+ 10. internal/cli/providers.go     — List configured providers
+ 11. Runner extension              — RunWithLLM lifecycle method
 
-Phase 7b: Remaining Providers
-  8. internal/llm/anthropic/       — Anthropic provider
-  9. internal/llm/gemini/          — Gemini provider
- 10. internal/llm/ollama/          — Ollama provider
+Phase 7b: Remaining Wire Formats
+ 12. internal/llm/gemini/          — Gemini wire format
+ 13. internal/llm/ollama/          — Ollama wire format
+ 14. internal/llm/custom/          — Custom JSON template wire format
 
 Phase 7c: Polish
- 11. Context window management     — token counting, history summarization
- 12. Retry logic                   — exponential backoff for rate limits
- 13. Cost tracking                 — token usage display after each turn
+ 15. Context window management     — token counting, history summarization
+ 16. Retry logic                   — exponential backoff for rate limits
+ 17. Cost tracking                 — token usage display after each turn
 ```
 
 Each step is independently testable and committable.
