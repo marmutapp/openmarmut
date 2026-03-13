@@ -20,14 +20,14 @@
 - [x] CLAUDE.md + rules setup
 
 ## Phase 2: Foundation Modules
-- [ ] `go.mod` init (`github.com/gajaai/opencode-go`)
-- [ ] `internal/runtime/runtime.go` — Runtime interface + shared types + sentinel errors
-- [ ] `internal/pathutil/pathutil.go` — Resolve + MustBeRelative
-- [ ] `internal/pathutil/pathutil_test.go` — all edge cases
-- [ ] `internal/config/config.go` — Config struct, Load, Validate, FlagOverrides
-- [ ] `internal/config/config_test.go` — merge order, validation
-- [ ] `internal/logger/logger.go` — New(LogConfig) → *slog.Logger
-- [ ] `internal/logger/logger_test.go`
+- [x] `go.mod` init (`github.com/gajaai/opencode-go`)
+- [x] `internal/runtime/runtime.go` — Runtime interface + shared types + sentinel errors
+- [x] `internal/pathutil/pathutil.go` — Resolve + MustBeRelative
+- [x] `internal/pathutil/pathutil_test.go` — all edge cases
+- [x] `internal/config/config.go` — Config struct, Load, Validate, FlagOverrides
+- [x] `internal/config/config_test.go` — merge order, validation
+- [x] `internal/logger/logger.go` — New(LogConfig) → *slog.Logger
+- [x] `internal/logger/logger_test.go`
 
 ## Phase 3: Local Runtime
 - [ ] `internal/localrt/localrt.go` — struct, New, Init, Close
@@ -92,5 +92,6 @@ A phase is complete when:
 Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 
 2026-03-13 | Phase 1 | Design complete. Specs, CLAUDE.md, rules, progress tracker created. | Start Phase 2: go.mod + foundation modules
+2026-03-13 | Phase 2 | All foundation modules implemented with tests: runtime interface, pathutil, config, logger. All tests pass. | Start Phase 3: local runtime
 
 <!-- Claude: append a new line here after each working session -->
