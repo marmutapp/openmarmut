@@ -1,0 +1,38 @@
+# Binaries
+opencode
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+/bin/
+/dist/
+
+# Session handoff files (temporary, per-session)
+progress/handoff-*.md
+
+# Local config (personal, not shared)
+CLAUDE.local.md
