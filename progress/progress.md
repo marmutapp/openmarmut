@@ -41,17 +41,17 @@
 - [x] Runtime compliance test (local)
 
 ## Phase 4: CLI
-- [ ] `internal/cli/root.go` — root cobra command + global flags
-- [ ] `internal/cli/runner.go` — Runner lifecycle helper
-- [ ] `internal/cli/read.go`
-- [ ] `internal/cli/write.go`
-- [ ] `internal/cli/delete.go`
-- [ ] `internal/cli/ls.go`
-- [ ] `internal/cli/mkdir.go`
-- [ ] `internal/cli/exec.go`
-- [ ] `internal/cli/info.go`
-- [ ] `cmd/opencode/main.go` — entrypoint
-- [ ] Smoke test: `go run ./cmd/opencode read README.md`
+- [x] `internal/cli/root.go` — root cobra command + global flags
+- [x] `internal/cli/runner.go` — Runner lifecycle helper
+- [x] `internal/cli/read.go`
+- [x] `internal/cli/write.go`
+- [x] `internal/cli/delete.go`
+- [x] `internal/cli/ls.go`
+- [x] `internal/cli/mkdir.go`
+- [x] `internal/cli/exec.go`
+- [x] `internal/cli/info.go`
+- [x] `cmd/opencode/main.go` — entrypoint
+- [x] Smoke test: `go run ./cmd/opencode read README.md`
 
 ## Phase 5: Docker Runtime
 - [ ] `internal/dockerrt/dockerrt.go` — struct, New, Init (container create/start)
@@ -94,5 +94,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 1 | Design complete. Specs, CLAUDE.md, rules, progress tracker created. | Start Phase 2: go.mod + foundation modules
 2026-03-13 | Phase 2 | All foundation modules implemented with tests: runtime interface, pathutil, config, logger. All tests pass. | Start Phase 3: local runtime
 2026-03-13 | Phase 3 | LocalRuntime fully implemented: all 8 methods + 44 tests. Atomic writes, path sandboxing, exit-code-not-error, process group kill on timeout. | Start Phase 4: CLI
+2026-03-13 | Phase 4 | CLI complete: root+runner+7 commands+main.go. Cobra-based with global flags, Runner lifecycle pattern. All smoke tests pass (read, write, delete, ls, mkdir, exec, info). | Start Phase 5: Docker runtime
 
 <!-- Claude: append a new line here after each working session -->

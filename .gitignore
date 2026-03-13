@@ -1,5 +1,5 @@
 # Binaries
-opencode
+/opencode
 *.exe
 *.dll
 *.so
