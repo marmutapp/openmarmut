@@ -2,10 +2,8 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
-	"os"
 )
 
 // Provider abstracts an LLM API. Implementations must be safe for sequential use.
@@ -15,7 +13,7 @@ type Provider interface {
 	// after the stream completes. Pass nil callback to skip streaming.
 	Complete(ctx context.Context, req Request, cb StreamCallback) (*Response, error)
 
-	// Name returns the provider identifier (e.g., "openai", "anthropic").
+	// Name returns the user-assigned provider name (e.g., "work-claude").
 	Name() string
 
 	// Model returns the model identifier being used.
@@ -30,14 +28,14 @@ type StreamCallback func(text string) error
 type Request struct {
 	Messages    []Message
 	Tools       []ToolDef
-	Temperature *float64 // nil = provider default
-	MaxTokens   *int     // nil = provider default
+	Temperature *float64 // nil = provider entry default
+	MaxTokens   *int     // nil = provider entry default
 }
 
 // Response is the result of a completion.
 type Response struct {
 	Content    string     // Text content (may be empty if only tool calls)
-	ToolCalls  []ToolCall // Tool invocations requested by the model
+	ToolCalls  []ToolCall // Zero or more tool invocations requested by the model
 	Usage      Usage      // Token counts
 	StopReason string     // "end", "tool_use", "max_tokens"
 }
@@ -81,14 +79,28 @@ type Usage struct {
 	TotalTokens      int
 }
 
-// ProviderConfig holds everything needed to create a provider.
-type ProviderConfig struct {
-	Name        string   // "openai", "anthropic", "gemini", "ollama"
-	Model       string   // e.g., "gpt-4o", "claude-sonnet-4-20250514"
-	APIKey      string   // Resolved key (never logged)
-	BaseURL     string   // Override for Ollama or proxies
-	Temperature *float64 // Default temperature (overridden per-request)
-	MaxTokens   *int     // Default max tokens (overridden per-request)
+// ProviderEntry is a single named provider configuration.
+// Users define one or more of these in their config file.
+type ProviderEntry struct {
+	Name          string            `yaml:"name"`           // User-chosen identifier (e.g., "work-claude", "local-llama")
+	Type          string            `yaml:"type"`           // Wire format: "openai", "anthropic", "gemini", "ollama", "custom"
+	EndpointURL   string            `yaml:"endpoint_url"`   // Full base URL (e.g., "https://api.openai.com")
+	ModelName     string            `yaml:"model"`          // Model identifier sent in the request
+	APIKey        string            `yaml:"api_key"`        // Env var reference: "$OPENAI_API_KEY" or "env:MY_KEY", or literal
+	Headers       map[string]string `yaml:"headers"`        // Extra HTTP headers (e.g., "api-version": "2024-02-01")
+	Auth          AuthConfig        `yaml:"auth"`           // How to authenticate requests
+	PayloadConfig json.RawMessage   `yaml:"payload_config"` // Type-specific overrides (custom type: full template)
+	ResponsePath  string            `yaml:"response_path"`  // JSONPath-like for custom type response extraction
+	Temperature   *float64          `yaml:"temperature"`    // Default temperature (nil = provider default)
+	MaxTokens     *int              `yaml:"max_tokens"`     // Default max tokens (nil = provider default)
+}
+
+// AuthConfig describes how to authenticate with an endpoint.
+type AuthConfig struct {
+	Type        string `yaml:"type"`         // "bearer", "header", "query", "none"
+	HeaderName  string `yaml:"header_name"`  // For "header" type: custom header name (e.g., "x-api-key")
+	TokenPrefix string `yaml:"token_prefix"` // For "bearer"/"header": prefix before the key
+	QueryParam  string `yaml:"query_param"`  // For "query" type: query parameter name (e.g., "key")
 }
 
 // Sentinel errors.
@@ -99,56 +111,3 @@ var (
 	ErrContextTooLong = errors.New("input exceeds model context window")
 	ErrStreamAborted  = errors.New("stream aborted by callback")
 )
-
-// ProviderConstructor creates a Provider from config.
-type ProviderConstructor func(cfg ProviderConfig, logger *slog.Logger) (Provider, error)
-
-var constructors = map[string]ProviderConstructor{}
-
-// Register adds a provider constructor for a given name.
-func Register(name string, ctor ProviderConstructor) {
-	constructors[name] = ctor
-}
-
-// NewProvider creates a Provider from config using the registered constructor.
-func NewProvider(cfg ProviderConfig, logger *slog.Logger) (Provider, error) {
-	ctor, ok := constructors[cfg.Name]
-	if !ok {
-		return nil, fmt.Errorf("llm.NewProvider: unknown provider %q", cfg.Name)
-	}
-	return ctor(cfg, logger)
-}
-
-// ResolveAPIKey returns the API key for a provider.
-// Returns empty string for providers that don't need auth (ollama).
-// Returns error if key is required but not found.
-func ResolveAPIKey(provider, apiKeyEnv string) (string, error) {
-	// Standard env var names per provider.
-	defaultEnvVars := map[string]string{
-		"openai":    "OPENAI_API_KEY",
-		"anthropic": "ANTHROPIC_API_KEY",
-		"gemini":    "GOOGLE_API_KEY",
-	}
-
-	// Ollama needs no key.
-	if provider == "ollama" {
-		return "", nil
-	}
-
-	// Try explicit env var name first.
-	if apiKeyEnv != "" {
-		if key := os.Getenv(apiKeyEnv); key != "" {
-			return key, nil
-		}
-	}
-
-	// Try standard env var for the provider.
-	if envName, ok := defaultEnvVars[provider]; ok {
-		if key := os.Getenv(envName); key != "" {
-			return key, nil
-		}
-	}
-
-	return "", fmt.Errorf("llm.ResolveAPIKey: %w: set %s or configure llm.api_key_env",
-		ErrAuthFailed, defaultEnvVars[provider])
-}

@@ -15,16 +15,18 @@ import (
 )
 
 const (
-	defaultBaseURL    = "https://api.anthropic.com"
-	apiVersion        = "2023-06-01"
-	messagesEndpoint  = "/v1/messages"
+	apiVersion       = "2023-06-01"
+	messagesEndpoint = "/v1/messages"
 )
 
 // Provider implements llm.Provider for the Anthropic Messages API.
 type Provider struct {
+	name    string
 	model   string
 	apiKey  string
 	baseURL string
+	auth    llm.AuthConfig
+	headers map[string]string
 	client  *http.Client
 	logger  *slog.Logger
 	defTemp *float64
@@ -32,37 +34,35 @@ type Provider struct {
 }
 
 func init() {
-	llm.Register("anthropic", func(cfg llm.ProviderConfig, logger *slog.Logger) (llm.Provider, error) {
-		return New(cfg, logger)
+	llm.RegisterType("anthropic", func(entry llm.ProviderEntry, logger *slog.Logger) (llm.Provider, error) {
+		return New(entry, logger)
 	})
 }
 
-// New creates an Anthropic provider.
-func New(cfg llm.ProviderConfig, logger *slog.Logger) (*Provider, error) {
-	if cfg.Model == "" {
+// New creates an Anthropic provider from a ProviderEntry.
+func New(entry llm.ProviderEntry, logger *slog.Logger) (*Provider, error) {
+	if entry.ModelName == "" {
 		return nil, fmt.Errorf("anthropic.New: model is required")
 	}
-	if cfg.APIKey == "" {
+	if entry.APIKey == "" && entry.Auth.Type != "none" {
 		return nil, fmt.Errorf("anthropic.New: %w", llm.ErrAuthFailed)
 	}
 
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-
 	return &Provider{
-		model:   cfg.Model,
-		apiKey:  cfg.APIKey,
-		baseURL: strings.TrimRight(baseURL, "/"),
+		name:    entry.Name,
+		model:   entry.ModelName,
+		apiKey:  entry.APIKey,
+		baseURL: strings.TrimRight(entry.EndpointURL, "/"),
+		auth:    entry.Auth,
+		headers: entry.Headers,
 		client:  &http.Client{},
 		logger:  logger,
-		defTemp: cfg.Temperature,
-		defMax:  cfg.MaxTokens,
+		defTemp: entry.Temperature,
+		defMax:  entry.MaxTokens,
 	}, nil
 }
 
-func (p *Provider) Name() string  { return "anthropic" }
+func (p *Provider) Name() string  { return p.name }
 func (p *Provider) Model() string { return p.model }
 
 // Complete sends a request to the Anthropic Messages API and streams the response.
@@ -78,8 +78,12 @@ func (p *Provider) Complete(ctx context.Context, req llm.Request, cb llm.StreamC
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", p.apiKey)
 	httpReq.Header.Set("anthropic-version", apiVersion)
+	llm.ApplyAuth(httpReq, p.auth, p.apiKey)
+
+	for k, v := range p.headers {
+		httpReq.Header.Set(k, v)
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -98,18 +102,18 @@ func (p *Provider) Complete(ctx context.Context, req llm.Request, cb llm.StreamC
 
 // apiRequest is the Anthropic Messages API request body.
 type apiRequest struct {
-	Model       string         `json:"model"`
-	Messages    []apiMessage   `json:"messages"`
-	System      string         `json:"system,omitempty"`
-	MaxTokens   int            `json:"max_tokens"`
-	Temperature *float64       `json:"temperature,omitempty"`
-	Stream      bool           `json:"stream"`
-	Tools       []apiToolDef   `json:"tools,omitempty"`
+	Model       string       `json:"model"`
+	Messages    []apiMessage `json:"messages"`
+	System      string       `json:"system,omitempty"`
+	MaxTokens   int          `json:"max_tokens"`
+	Temperature *float64     `json:"temperature,omitempty"`
+	Stream      bool         `json:"stream"`
+	Tools       []apiToolDef `json:"tools,omitempty"`
 }
 
 type apiMessage struct {
-	Role    string           `json:"role"`
-	Content json.RawMessage  `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
 }
 
 type apiContentBlock struct {
@@ -342,12 +346,12 @@ func (p *Provider) parseSSEStream(body io.Reader, cb llm.StreamCallback) (*llm.R
 // --- SSE Event Types ---
 
 type sseEvent struct {
-	Type         string       `json:"type"`
-	Message      *sseMessage  `json:"message,omitempty"`
-	ContentBlock *sseCB       `json:"content_block,omitempty"`
-	Delta        *sseDelta    `json:"delta,omitempty"`
-	Index        int          `json:"index"`
-	Usage        *sseUsage    `json:"usage,omitempty"`
+	Type         string      `json:"type"`
+	Message      *sseMessage `json:"message,omitempty"`
+	ContentBlock *sseCB      `json:"content_block,omitempty"`
+	Delta        *sseDelta   `json:"delta,omitempty"`
+	Index        int         `json:"index"`
+	Usage        *sseUsage   `json:"usage,omitempty"`
 }
 
 type sseMessage struct {

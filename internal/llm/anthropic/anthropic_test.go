@@ -20,10 +20,13 @@ var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func testProvider(t *testing.T, url string) *Provider {
 	t.Helper()
-	p, err := New(llm.ProviderConfig{
-		Model:   "claude-sonnet-4-20250514",
-		APIKey:  "test-key",
-		BaseURL: url,
+	p, err := New(llm.ProviderEntry{
+		Name:        "test",
+		Type:        "anthropic",
+		ModelName:   "claude-sonnet-4-20250514",
+		APIKey:      "test-key",
+		EndpointURL: url,
+		Auth:        llm.AuthConfig{Type: "header", HeaderName: "x-api-key"},
 	}, testLogger)
 	require.NoError(t, err)
 	return p
@@ -43,22 +46,29 @@ func sseLines(events ...string) string {
 // --- Constructor Tests ---
 
 func TestNew_Success(t *testing.T) {
-	p, err := New(llm.ProviderConfig{
-		Model:  "claude-sonnet-4-20250514",
-		APIKey: "sk-test",
+	p, err := New(llm.ProviderEntry{
+		Name:        "my-claude",
+		Type:        "anthropic",
+		ModelName:   "claude-sonnet-4-20250514",
+		APIKey:      "sk-test",
+		EndpointURL: "https://api.anthropic.com",
+		Auth:        llm.AuthConfig{Type: "header", HeaderName: "x-api-key"},
 	}, testLogger)
 
 	require.NoError(t, err)
-	assert.Equal(t, "anthropic", p.Name())
+	assert.Equal(t, "my-claude", p.Name())
 	assert.Equal(t, "claude-sonnet-4-20250514", p.Model())
-	assert.Equal(t, defaultBaseURL, p.baseURL)
+	assert.Equal(t, "https://api.anthropic.com", p.baseURL)
 }
 
 func TestNew_CustomBaseURL(t *testing.T) {
-	p, err := New(llm.ProviderConfig{
-		Model:   "claude-sonnet-4-20250514",
-		APIKey:  "sk-test",
-		BaseURL: "https://custom.api.com/",
+	p, err := New(llm.ProviderEntry{
+		Name:        "test",
+		Type:        "anthropic",
+		ModelName:   "claude-sonnet-4-20250514",
+		APIKey:      "sk-test",
+		EndpointURL: "https://custom.api.com/",
+		Auth:        llm.AuthConfig{Type: "header", HeaderName: "x-api-key"},
 	}, testLogger)
 
 	require.NoError(t, err)
@@ -66,13 +76,21 @@ func TestNew_CustomBaseURL(t *testing.T) {
 }
 
 func TestNew_MissingModel(t *testing.T) {
-	_, err := New(llm.ProviderConfig{APIKey: "sk-test"}, testLogger)
+	_, err := New(llm.ProviderEntry{
+		Name:   "test",
+		APIKey: "sk-test",
+		Auth:   llm.AuthConfig{Type: "header", HeaderName: "x-api-key"},
+	}, testLogger)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "model is required")
 }
 
 func TestNew_MissingAPIKey(t *testing.T) {
-	_, err := New(llm.ProviderConfig{Model: "test"}, testLogger)
+	_, err := New(llm.ProviderEntry{
+		Name:      "test",
+		ModelName: "test",
+		Auth:      llm.AuthConfig{Type: "header", HeaderName: "x-api-key"},
+	}, testLogger)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, llm.ErrAuthFailed)
 }
@@ -445,12 +463,13 @@ func TestComplete_DefaultMaxTokens(t *testing.T) {
 
 func TestRegistration(t *testing.T) {
 	// The init() function should have registered the provider.
-	p, err := llm.NewProvider(llm.ProviderConfig{
-		Name:   "anthropic",
-		Model:  "claude-sonnet-4-20250514",
-		APIKey: "test-key",
+	p, err := llm.NewProvider(llm.ProviderEntry{
+		Name:      "my-anthropic",
+		Type:      "anthropic",
+		ModelName: "claude-sonnet-4-20250514",
+		APIKey:    "test-key",
 	}, testLogger)
 
 	require.NoError(t, err)
-	assert.Equal(t, "anthropic", p.Name())
+	assert.Equal(t, "my-anthropic", p.Name())
 }

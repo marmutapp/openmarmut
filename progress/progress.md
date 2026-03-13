@@ -80,18 +80,17 @@
 
 ### Phase 7a: Foundation
 - [x] `specs/llm-spec.md` — LLM integration specification v2 (provider type system, custom endpoints)
-- [x] `internal/llm/llm.go` — Provider interface, types, sentinel errors (needs update to ProviderEntry)
-- [ ] `internal/llm/llm.go` — Update factory to RegisterType/NewProvider with ProviderEntry
-- [ ] `internal/llm/llm.go` — ProviderEntry, AuthConfig structs, ResolveCredential
-- [ ] `internal/llm/llm_test.go` — Update tests for new factory + credential resolution
+- [x] `internal/llm/types.go` — Provider interface, Request/Response, ProviderEntry, AuthConfig, sentinel errors
+- [x] `internal/llm/factory.go` — RegisterType/NewProvider with ProviderEntry (defaults + credential resolution)
+- [x] `internal/llm/credentials.go` — ResolveCredential, ApplyAuth, DefaultAuthForType, DefaultEndpointURL
+- [x] `internal/llm/llm_test.go` — 20 tests: factory, credentials, auth, defaults
 - [ ] Config additions — `LLMConfig` with `[]ProviderEntry`, `active_provider`, validation
 - [ ] Config additions — FlagOverrides: `--provider`, `--model`, `--temperature`
 - [ ] Config additions — Active provider resolution logic (flag > env > config > single-entry)
 - [ ] `internal/llm/openai/openai.go` — OpenAI wire format (streaming, tool calls)
 - [ ] `internal/llm/openai/openai_test.go` — httptest-based unit tests
-- [x] `internal/llm/anthropic/anthropic.go` — Anthropic wire format (needs update to ProviderEntry)
-- [ ] `internal/llm/anthropic/anthropic.go` — Update to accept ProviderEntry instead of ProviderConfig
-- [x] `internal/llm/anthropic/anthropic_test.go` — 16 httptest-based unit tests (update for ProviderEntry)
+- [x] `internal/llm/anthropic/anthropic.go` — Anthropic wire format (updated to ProviderEntry + ApplyAuth)
+- [x] `internal/llm/anthropic/anthropic_test.go` — 16 httptest-based unit tests (updated for ProviderEntry)
 - [ ] `internal/agent/agent.go` — Agent loop (observe→plan→act→verify)
 - [ ] `internal/agent/tools.go` — Tool registry mapping to Runtime methods
 - [ ] `internal/agent/agent_test.go` — Agent loop tests with mock provider
