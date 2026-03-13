@@ -10,11 +10,14 @@ func NewRootCmd() *cobra.Command {
 	flags := &config.FlagOverrides{}
 
 	var (
-		mode      string
-		target    string
-		cfgPath   string
-		logLevel  string
-		logFormat string
+		mode        string
+		target      string
+		cfgPath     string
+		logLevel    string
+		logFormat   string
+		llmProvider string
+		llmModel    string
+		llmTemp     float64
 	)
 
 	root := &cobra.Command{
@@ -38,6 +41,15 @@ func NewRootCmd() *cobra.Command {
 			if cmd.Flags().Changed("log-format") {
 				flags.LogFormat = &logFormat
 			}
+			if cmd.Flags().Changed("provider") {
+				flags.LLMProvider = &llmProvider
+			}
+			if cmd.Flags().Changed("model") {
+				flags.LLMModel = &llmModel
+			}
+			if cmd.Flags().Changed("temperature") {
+				flags.LLMTemperature = &llmTemp
+			}
 		},
 	}
 
@@ -47,6 +59,9 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVarP(&cfgPath, "config", "c", "", "config file path")
 	pf.StringVar(&logLevel, "log-level", "", "log level: debug/info/warn/error")
 	pf.StringVar(&logFormat, "log-format", "", "log format: text/json")
+	pf.StringVarP(&llmProvider, "provider", "p", "", "LLM provider name")
+	pf.StringVar(&llmModel, "model", "", "override model for the active LLM provider")
+	pf.Float64Var(&llmTemp, "temperature", 0, "sampling temperature (0.0–2.0)")
 
 	runner := NewRunner(flags)
 
@@ -58,6 +73,8 @@ func NewRootCmd() *cobra.Command {
 		newMkdirCmd(runner),
 		newExecCmd(runner),
 		newInfoCmd(runner),
+		newProvidersCmd(runner),
+		newAskCmd(runner),
 	)
 
 	return root

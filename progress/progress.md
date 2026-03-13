@@ -95,9 +95,10 @@
 - [ ] `internal/agent/tools.go` — Tool registry mapping to Runtime methods
 - [ ] `internal/agent/agent_test.go` — Agent loop tests with mock provider
 - [ ] `internal/agent/security.go` — ContainsAPIKey, credential redaction
-- [ ] `internal/cli/ask.go` — `opencode ask "question"` single-shot command
+- [x] `internal/cli/ask.go` — `opencode ask "question"` single-shot command (single-turn, no agent)
 - [ ] `internal/cli/chat.go` — `opencode chat` interactive REPL
-- [ ] `internal/cli/providers.go` — `opencode providers` list command
+- [x] `internal/cli/providers.go` — `opencode providers` list command
+- [x] Root command flags: `--provider`, `--model`, `--temperature`
 - [ ] Runner extension — `RunWithLLM` lifecycle method
 
 ### Phase 7b: Remaining Wire Formats
@@ -141,5 +142,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 7 | Rewrote specs/llm-spec.md v2: provider type system (wire format abstraction), ProviderEntry/AuthConfig structs, multi-provider config with active_provider, credential env var references, custom endpoint support, `opencode providers` command. Updated progress.md Phase 7 checkboxes. | Continue Phase 7a: update llm.go to ProviderEntry, implement OpenAI wire format
 2026-03-13 | Phase 7a | Rewrote LLM package: types.go + factory.go + credentials.go replacing llm.go. ProviderEntry/AuthConfig, RegisterType/NewProvider factory with defaults+credential resolution, ApplyAuth helper. Updated Anthropic to ProviderEntry. Implemented OpenAI wire format: SSE streaming, tool call accumulation, custom headers. 57 total tests (20 llm + 16 anthropic + 21 openai). | Continue Phase 7a: config additions, agent loop, CLI commands
 2026-03-13 | Phase 7a | LLM config wired into internal/config: LLMConfig struct (Providers, ActiveProvider, DefaultTemperature, DefaultMaxTokens, DefaultTimeout), FlagOverrides (--provider, --model, --temperature), env vars (OPENCODE_LLM_PROVIDER/MODEL/API_KEY), validation, ResolveActiveProvider with override chain. 29 new tests (42 total config tests). | Continue Phase 7a: agent loop, CLI commands
+2026-03-13 | Phase 7a | CLI commands: `opencode providers` (tabwriter, active marker), `opencode ask` (single-turn streaming via provider.Complete), root flags --provider/--model/--temperature wired to FlagOverrides. Smoke tested with multi-provider config. | Continue Phase 7a: agent loop, chat REPL
 
 <!-- Claude: append a new line here after each working session -->
