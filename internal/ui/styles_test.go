@@ -327,3 +327,40 @@ func TestFormatSummary_WithoutContextPct(t *testing.T) {
 	result := FormatSummary(0, 100, 50, "", time.Second)
 	assert.NotContains(t, result, "ctx:")
 }
+
+func TestRenderPlanBox_ColorOff(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	result := RenderPlanBox("## Plan\n\n1. Do something")
+	assert.Contains(t, result, "Plan")
+	assert.Contains(t, result, "Do something")
+}
+
+func TestRenderPlanBox_ColorOn(t *testing.T) {
+	overrideTTY(true)
+	defer overrideTTY(false)
+
+	result := RenderPlanBox("## Plan\n\n1. Do something")
+	assert.Contains(t, result, "Plan")
+	assert.Contains(t, result, "Do something")
+}
+
+func TestRenderPlanApproval_ColorOff(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	result := RenderPlanApproval()
+	assert.Contains(t, result, "[y]es")
+	assert.Contains(t, result, "[n]o")
+	assert.Contains(t, result, "[e]dit")
+}
+
+func TestRenderPlanApproval_ColorOn(t *testing.T) {
+	overrideTTY(true)
+	defer overrideTTY(false)
+
+	result := RenderPlanApproval()
+	assert.Contains(t, result, "[y]es")
+	assert.Contains(t, result, "[e]dit")
+}

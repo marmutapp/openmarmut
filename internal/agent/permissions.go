@@ -51,16 +51,23 @@ func ParsePermissionLevel(s string) (PermissionLevel, bool) {
 // read-only tools are auto, write/execute tools require confirmation.
 func DefaultPermissions() map[string]PermissionLevel {
 	return map[string]PermissionLevel{
-		"read_file":       PermAuto,
-		"read_file_lines": PermAuto,
-		"list_dir":        PermAuto,
-		"grep_files":      PermAuto,
-		"find_files":      PermAuto,
-		"write_file":      PermConfirm,
-		"patch_file":      PermConfirm,
-		"delete_file":     PermConfirm,
-		"mkdir":           PermConfirm,
-		"execute_command": PermConfirm,
+		"read_file":        PermAuto,
+		"read_file_lines":  PermAuto,
+		"list_dir":         PermAuto,
+		"grep_files":       PermAuto,
+		"find_files":       PermAuto,
+		"git_status":       PermAuto,
+		"git_diff":         PermAuto,
+		"git_diff_staged":  PermAuto,
+		"git_log":          PermAuto,
+		"write_file":       PermConfirm,
+		"patch_file":       PermConfirm,
+		"delete_file":      PermConfirm,
+		"mkdir":            PermConfirm,
+		"execute_command":  PermConfirm,
+		"git_commit":       PermConfirm,
+		"git_branch":       PermConfirm,
+		"git_checkout":     PermConfirm,
 	}
 }
 
@@ -225,6 +232,22 @@ func FormatToolPreview(tc llm.ToolCall) string {
 		}
 		if w, ok := args["workdir"]; ok && w != "" {
 			fmt.Fprintf(&b, "\n  workdir: %v", w)
+		}
+	case "git_commit":
+		if m, ok := args["message"]; ok {
+			msg := fmt.Sprintf("%v", m)
+			if len(msg) > 120 {
+				msg = msg[:120] + "..."
+			}
+			fmt.Fprintf(&b, "\n  message: %s", msg)
+		}
+	case "git_branch":
+		if n, ok := args["name"]; ok && n != "" {
+			fmt.Fprintf(&b, " (create: %v)", n)
+		}
+	case "git_checkout":
+		if br, ok := args["branch"]; ok {
+			fmt.Fprintf(&b, "(%v)", br)
 		}
 	default:
 		// Generic: show all args.

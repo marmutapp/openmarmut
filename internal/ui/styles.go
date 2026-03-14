@@ -44,6 +44,11 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBrand).
 			Padding(0, 1)
+
+	PlanBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorSecond).
+			Padding(0, 1)
 )
 
 // styled returns styled text if color is enabled, plain text otherwise.
@@ -224,6 +229,25 @@ func RenderConfirmBox(preview string) string {
 	header := WarningStyle.Render("Permission Required")
 	footer := DimStyle.Render("[y]es / [n]o / [a]lways")
 	return "\n" + header + "\n" + box + "\n" + footer + " "
+}
+
+// RenderPlanBox renders a plan inside a blue-bordered box.
+func RenderPlanBox(plan string) string {
+	rendered := RenderMarkdown(plan)
+	if !ColorEnabled() {
+		return fmt.Sprintf("── Plan ──\n%s\n────────", rendered)
+	}
+	box := PlanBoxStyle.Render(rendered)
+	title := lipgloss.NewStyle().Bold(true).Foreground(ColorSecond).Render("Plan")
+	return "\n" + title + "\n" + box
+}
+
+// RenderPlanApproval renders the plan approval prompt footer.
+func RenderPlanApproval() string {
+	if !ColorEnabled() {
+		return "[y]es — execute / [n]o — discard / [e]dit — refine"
+	}
+	return DimStyle.Render("[y]es — execute / [n]o — discard / [e]dit — refine") + " "
 }
 
 // RenderMarkdown renders markdown text with glamour (dark theme).

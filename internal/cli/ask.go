@@ -23,6 +23,7 @@ import (
 
 func newAskCmd(runner *Runner) *cobra.Command {
 	var noTools bool
+	var planFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "ask <question>",
@@ -121,6 +122,11 @@ func newAskCmd(runner *Runner) *cobra.Command {
 			}
 			opts = append(opts, agent.WithContextConfig(ctxCfg))
 
+			// Extended thinking from provider entry config.
+			if entry.ExtendedThinking {
+				opts = append(opts, agent.WithExtendedThinking(true, entry.ThinkingBudget))
+			}
+
 			// In non-interactive ask mode, auto-approve all tools.
 			pc := agent.NewPermissionChecker(
 				agent.BuildPermissions(cfg.Agent.AutoAllow, cfg.Agent.Confirm),
@@ -129,6 +135,56 @@ func newAskCmd(runner *Runner) *cobra.Command {
 			opts = append(opts, agent.WithPermissionChecker(pc))
 
 			ag := agent.New(provider, rt, log, opts...)
+
+			// Resolve @file references in the question.
+			question, fileWarnings := resolveFileRefs(cmd.Context(), question, rt)
+			for _, w := range fileWarnings {
+				fmt.Fprintln(os.Stderr, ui.FormatWarning(w))
+			}
+
+			if planFlag {
+				// Plan mode: analyze first, then execute.
+				planResult, planErr := ag.RunPlan(cmd.Context(), question, streamCB)
+				spinner.Stop()
+				if planErr != nil {
+					return fmt.Errorf("ask: plan: %w", planErr)
+				}
+
+				plan := planResult.Response
+
+				// Display plan.
+				fmt.Fprintln(os.Stderr, ui.RenderPlanBox(plan))
+				planCostStr := llm.FormatCost(planResult.Usage, provider.Model())
+				fmt.Fprintln(os.Stderr, ui.FormatSummary(
+					len(planResult.Steps), planResult.Usage.PromptTokens,
+					planResult.Usage.CompletionTokens, planCostStr, planResult.Duration,
+				))
+
+				// Execute the plan.
+				executeMsg := fmt.Sprintf(
+					"Execute the following plan. The original request was: %s\n\n---\n\n%s",
+					question, plan,
+				)
+
+				spinner = ui.NewSpinner(os.Stderr, "Executing plan...")
+				spinner.Start()
+				firstToken = true
+
+				result, err := ag.Run(cmd.Context(), executeMsg, streamCB)
+				spinner.Stop()
+				if err != nil {
+					return fmt.Errorf("ask: execute: %w", err)
+				}
+
+				fmt.Fprintln(os.Stdout)
+				costStr := llm.FormatCost(result.Usage, provider.Model())
+				fmt.Fprintln(os.Stderr, "\n"+ui.FormatSummary(
+					len(result.Steps), result.Usage.PromptTokens,
+					result.Usage.CompletionTokens, costStr, result.Duration,
+				))
+				return nil
+			}
+
 			result, err := ag.Run(cmd.Context(), question, streamCB)
 			spinner.Stop()
 			if err != nil {
@@ -153,6 +209,7 @@ func newAskCmd(runner *Runner) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&noTools, "no-tools", false, "disable tools (simple single-turn question)")
+	cmd.Flags().BoolVar(&planFlag, "plan", false, "plan first, then execute (analyze before acting)")
 	return cmd
 }
 

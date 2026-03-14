@@ -47,7 +47,8 @@ func (s *stubRuntime) TargetDir() string { return "/test" }
 var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func newTestState() (*chatState, *bytes.Buffer) {
-	ag := agent.New(&panicProvider{}, &stubRuntime{}, testLogger)
+	rt := &stubRuntime{}
+	ag := agent.New(&panicProvider{}, rt, testLogger)
 	pc := agent.NewPermissionChecker(agent.DefaultPermissions(), nil)
 	var buf bytes.Buffer
 	state := &chatState{
@@ -55,6 +56,7 @@ func newTestState() (*chatState, *bytes.Buffer) {
 		permChecker: pc,
 		model:       "gpt-4o",
 		out:         &buf,
+		rt:          rt,
 	}
 	return state, &buf
 }
@@ -162,7 +164,7 @@ func TestSlashCommands_NeverCallProvider(t *testing.T) {
 	// the test panics instead of failing gracefully.
 	state, _ := newTestState()
 
-	commands := []string{"/help", "/tools", "/cost", "/context", "/clear", "/quit", "/exit", "/unknown"}
+	commands := []string{"/help", "/tools", "/cost", "/context", "/clear", "/quit", "/exit", "/sessions", "/rewind --list", "/diff", "/plan", "/plan on", "/plan off", "/unknown"}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
 			require.NotPanics(t, func() {
@@ -443,4 +445,348 @@ func TestInteractiveConfirm_EOF_Denies(t *testing.T) {
 
 	result := confirmFn(tc, "→ write_file(x.go)")
 	assert.Equal(t, agent.ConfirmNo, result, "EOF should deny")
+}
+
+func TestSlashRewindList_NoCheckpoints(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/rewind --list", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "not enabled")
+}
+
+func TestSlashRewind_NoCheckpointStore(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/rewind", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "not enabled")
+}
+
+func TestSlashDiff_NotGitRepo(t *testing.T) {
+	state, buf := newTestState()
+	state.isGitRepo = false
+	action := handleSlashCommand("/diff", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Not a git repository")
+}
+
+func TestSlashCommit_NotGitRepo(t *testing.T) {
+	state, buf := newTestState()
+	state.isGitRepo = false
+	action := handleSlashCommand("/commit", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Not a git repository")
+}
+
+func TestSlashHelp_IncludesGitCommands(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/help", state)
+	output := buf.String()
+	assert.Contains(t, output, "/diff")
+	assert.Contains(t, output, "/commit")
+	assert.Contains(t, output, "/rewind")
+}
+
+func TestHasFileChanges(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   *agent.Result
+		expected bool
+	}{
+		{
+			"no steps",
+			&agent.Result{},
+			false,
+		},
+		{
+			"read only",
+			&agent.Result{Steps: []agent.Step{
+				{ToolCall: llm.ToolCall{Name: "read_file"}},
+			}},
+			false,
+		},
+		{
+			"write file",
+			&agent.Result{Steps: []agent.Step{
+				{ToolCall: llm.ToolCall{Name: "write_file"}, Output: "ok"},
+			}},
+			true,
+		},
+		{
+			"write with error",
+			&agent.Result{Steps: []agent.Step{
+				{ToolCall: llm.ToolCall{Name: "write_file"}, Error: "failed"},
+			}},
+			false,
+		},
+		{
+			"patch file",
+			&agent.Result{Steps: []agent.Step{
+				{ToolCall: llm.ToolCall{Name: "patch_file"}, Output: "ok"},
+			}},
+			true,
+		},
+		{
+			"delete file",
+			&agent.Result{Steps: []agent.Step{
+				{ToolCall: llm.ToolCall{Name: "delete_file"}, Output: "ok"},
+			}},
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, hasFileChanges(tt.result))
+		})
+	}
+}
+
+func TestFormatToolArgs_GitTools(t *testing.T) {
+	tests := []struct {
+		name     string
+		tc       llm.ToolCall
+		expected string
+	}{
+		{
+			"git_diff with path",
+			llm.ToolCall{Name: "git_diff", Arguments: `{"path":"main.go"}`},
+			"main.go",
+		},
+		{
+			"git_commit",
+			llm.ToolCall{Name: "git_commit", Arguments: `{"message":"feat: add feature"}`},
+			"feat: add feature",
+		},
+		{
+			"git_branch create",
+			llm.ToolCall{Name: "git_branch", Arguments: `{"name":"feature"}`},
+			"create: feature",
+		},
+		{
+			"git_checkout",
+			llm.ToolCall{Name: "git_checkout", Arguments: `{"branch":"main"}`},
+			"main",
+		},
+		{
+			"git_log with n",
+			llm.ToolCall{Name: "git_log", Arguments: `{"n":5}`},
+			"n=5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatToolArgs(tt.tc)
+			assert.Contains(t, result, tt.expected)
+		})
+	}
+}
+
+func TestShellQuoteCLI(t *testing.T) {
+	assert.Equal(t, "'hello'", shellQuoteCLI("hello"))
+	assert.Equal(t, "'it'\\''s'", shellQuoteCLI("it's"))
+}
+
+// --- Plan Mode Tests ---
+
+func TestSlashPlan_Toggle(t *testing.T) {
+	state, buf := newTestState()
+
+	// Initially off.
+	assert.False(t, state.planMode)
+
+	// Toggle on.
+	action := handleSlashCommand("/plan", state)
+	assert.Equal(t, slashHandled, action)
+	assert.True(t, state.planMode)
+	assert.Contains(t, buf.String(), "Plan mode ON")
+
+	// Toggle off.
+	buf.Reset()
+	action = handleSlashCommand("/plan", state)
+	assert.Equal(t, slashHandled, action)
+	assert.False(t, state.planMode)
+	assert.Contains(t, buf.String(), "Plan mode OFF")
+}
+
+func TestSlashPlan_OnOff(t *testing.T) {
+	state, buf := newTestState()
+
+	handleSlashCommand("/plan on", state)
+	assert.True(t, state.planMode)
+	assert.Contains(t, buf.String(), "ON")
+
+	buf.Reset()
+	handleSlashCommand("/plan off", state)
+	assert.False(t, state.planMode)
+	assert.Contains(t, buf.String(), "OFF")
+}
+
+func TestSlashPlan_NeverCallsProvider(t *testing.T) {
+	state, _ := newTestState()
+	require.NotPanics(t, func() {
+		handleSlashCommand("/plan", state)
+	}, "/plan toggle should not call the LLM provider")
+
+	require.NotPanics(t, func() {
+		handleSlashCommand("/plan on", state)
+	})
+
+	require.NotPanics(t, func() {
+		handleSlashCommand("/plan off", state)
+	})
+}
+
+func TestSlashHelp_IncludesPlan(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/help", state)
+	assert.Contains(t, buf.String(), "/plan")
+}
+
+func TestSlashCommands_NeverCallProvider_IncludesPlan(t *testing.T) {
+	state, _ := newTestState()
+	// Plan toggle commands should never reach the LLM.
+	planCommands := []string{"/plan", "/plan on", "/plan off"}
+	for _, cmd := range planCommands {
+		t.Run(cmd, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				handleSlashCommand(cmd, state)
+			}, "command %q should not call the LLM", cmd)
+		})
+	}
+}
+
+func TestSlashHelp_IncludesCompact(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/help", state)
+	assert.Contains(t, buf.String(), "/compact")
+}
+
+// compactProvider returns a summary when Complete is called (used for /compact tests).
+type compactProvider struct {
+	summary string
+}
+
+func (p *compactProvider) Name() string  { return "compact-test" }
+func (p *compactProvider) Model() string { return "compact-model" }
+func (p *compactProvider) Complete(_ context.Context, _ llm.Request, _ llm.StreamCallback) (*llm.Response, error) {
+	return &llm.Response{Content: p.summary}, nil
+}
+
+func TestSlashCompact_ReducesHistory(t *testing.T) {
+	rt := &stubRuntime{}
+	provider := &compactProvider{summary: "Summary: user asked about auth."}
+	ag := agent.New(provider, rt, testLogger)
+	pc := agent.NewPermissionChecker(agent.DefaultPermissions(), nil)
+
+	// Seed history with enough messages.
+	ag.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Content: "System prompt."},
+		{Role: llm.RoleUser, Content: "Refactor auth module."},
+		{Role: llm.RoleAssistant, Content: "Working on it..."},
+		{Role: llm.RoleUser, Content: "Also update tests."},
+		{Role: llm.RoleAssistant, Content: "Done with all changes."},
+	})
+
+	var buf bytes.Buffer
+	state := &chatState{
+		ag:          ag,
+		permChecker: pc,
+		model:       "test-model",
+		out:         &buf,
+		rt:          rt,
+	}
+
+	action := handleSlashCommand("/compact", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Compacted")
+	assert.Contains(t, buf.String(), "reduction")
+
+	// History should be reduced to 3 messages.
+	assert.Len(t, ag.History(), 3)
+}
+
+func TestSlashCompact_WithCustomInstruction(t *testing.T) {
+	rt := &stubRuntime{}
+	provider := &compactProvider{summary: "Summary focused on auth."}
+	ag := agent.New(provider, rt, testLogger)
+
+	ag.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Content: "System."},
+		{Role: llm.RoleUser, Content: "Q1."},
+		{Role: llm.RoleAssistant, Content: "A1."},
+		{Role: llm.RoleUser, Content: "Q2."},
+	})
+
+	var buf bytes.Buffer
+	state := &chatState{
+		ag:    ag,
+		model: "test",
+		out:   &buf,
+		rt:    rt,
+	}
+
+	action := handleSlashCommand(`/compact "Preserve the auth changes"`, state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Compacted")
+}
+
+func TestSlashCompact_TooFewMessages(t *testing.T) {
+	state, buf := newTestState()
+
+	// Default agent has only system prompt, too few to compact.
+	action := handleSlashCommand("/compact", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Nothing to compact")
+}
+
+func TestSlashThinking_Toggle(t *testing.T) {
+	state, buf := newTestState()
+
+	assert.False(t, state.ag.ExtendedThinking())
+
+	action := handleSlashCommand("/thinking", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "ON")
+	assert.True(t, state.ag.ExtendedThinking())
+
+	buf.Reset()
+	action = handleSlashCommand("/thinking", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "OFF")
+	assert.False(t, state.ag.ExtendedThinking())
+}
+
+func TestSlashEffort_SetsLevel(t *testing.T) {
+	tests := []struct {
+		cmd    string
+		output string
+	}{
+		{"/effort low", "low"},
+		{"/effort medium", "medium"},
+		{"/effort high", "high"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			state, buf := newTestState()
+			action := handleSlashCommand(tt.cmd, state)
+			assert.Equal(t, slashHandled, action)
+			assert.Contains(t, buf.String(), tt.output)
+			assert.True(t, state.ag.ExtendedThinking(), "effort should enable thinking")
+		})
+	}
+}
+
+func TestSlashEffort_InvalidLevel(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/effort banana", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashHelp_IncludesThinking(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/help", state)
+	assert.Contains(t, buf.String(), "/thinking")
+	assert.Contains(t, buf.String(), "/effort")
 }

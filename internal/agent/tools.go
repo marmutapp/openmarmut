@@ -31,6 +31,13 @@ func DefaultTools() []Tool {
 		execTool(),
 		grepFilesTool(),
 		findFilesTool(),
+		gitStatusTool(),
+		gitDiffTool(),
+		gitDiffStagedTool(),
+		gitLogTool(),
+		gitCommitTool(),
+		gitBranchTool(),
+		gitCheckoutTool(),
 	}
 }
 
@@ -486,6 +493,293 @@ func findFilesTool() Tool {
 // shellQuote wraps a string in single quotes for safe shell interpolation.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// --- Git Tools ---
+
+func gitStatusTool() Tool {
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "git_status",
+			Description: "Show the working tree status (modified, staged, untracked files).",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		Execute: func(ctx context.Context, rt runtime.Runtime, args json.RawMessage) (string, error) {
+			result, err := rt.Exec(ctx, "git status --short", runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if result.ExitCode != 0 {
+				return "", fmt.Errorf("git_status: %s", result.Stderr)
+			}
+			output := strings.TrimRight(result.Stdout, "\n")
+			if output == "" {
+				return "working tree clean", nil
+			}
+			return output, nil
+		},
+	}
+}
+
+func gitDiffTool() Tool {
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "git_diff",
+			Description: "Show unstaged changes. Optionally for a specific file.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File path to diff (optional, omit for all changes)",
+					},
+				},
+			},
+		},
+		Execute: func(ctx context.Context, rt runtime.Runtime, args json.RawMessage) (string, error) {
+			var p struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return "", fmt.Errorf("git_diff: %w", err)
+			}
+
+			cmd := "git diff"
+			if p.Path != "" {
+				cmd += " -- " + shellQuote(p.Path)
+			}
+
+			result, err := rt.Exec(ctx, cmd, runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if result.ExitCode != 0 {
+				return "", fmt.Errorf("git_diff: %s", result.Stderr)
+			}
+			output := strings.TrimRight(result.Stdout, "\n")
+			if output == "" {
+				return "no unstaged changes", nil
+			}
+			return output, nil
+		},
+	}
+}
+
+func gitDiffStagedTool() Tool {
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "git_diff_staged",
+			Description: "Show staged (cached) changes that will be included in the next commit.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		Execute: func(ctx context.Context, rt runtime.Runtime, args json.RawMessage) (string, error) {
+			result, err := rt.Exec(ctx, "git diff --cached", runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if result.ExitCode != 0 {
+				return "", fmt.Errorf("git_diff_staged: %s", result.Stderr)
+			}
+			output := strings.TrimRight(result.Stdout, "\n")
+			if output == "" {
+				return "no staged changes", nil
+			}
+			return output, nil
+		},
+	}
+}
+
+func gitLogTool() Tool {
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "git_log",
+			Description: "Show recent commit history with hash, author, date, and message.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"n": map[string]any{
+						"type":        "integer",
+						"description": "Number of commits to show (default: 10)",
+					},
+				},
+			},
+		},
+		Execute: func(ctx context.Context, rt runtime.Runtime, args json.RawMessage) (string, error) {
+			var p struct {
+				N int `json:"n"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return "", fmt.Errorf("git_log: %w", err)
+			}
+			if p.N <= 0 {
+				p.N = 10
+			}
+			if p.N > 50 {
+				p.N = 50
+			}
+
+			cmd := fmt.Sprintf("git log --oneline --no-decorate -n %d", p.N)
+			result, err := rt.Exec(ctx, cmd, runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if result.ExitCode != 0 {
+				return "", fmt.Errorf("git_log: %s", result.Stderr)
+			}
+			output := strings.TrimRight(result.Stdout, "\n")
+			if output == "" {
+				return "no commits found", nil
+			}
+			return output, nil
+		},
+	}
+}
+
+func gitCommitTool() Tool {
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "git_commit",
+			Description: "Stage all changes and create a git commit with the given message.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"message": map[string]any{
+						"type":        "string",
+						"description": "Commit message",
+					},
+				},
+				"required": []string{"message"},
+			},
+		},
+		Execute: func(ctx context.Context, rt runtime.Runtime, args json.RawMessage) (string, error) {
+			var p struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return "", fmt.Errorf("git_commit: %w", err)
+			}
+			if p.Message == "" {
+				return "", fmt.Errorf("git_commit: message is required")
+			}
+
+			// Stage all changes.
+			addResult, err := rt.Exec(ctx, "git add -A", runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if addResult.ExitCode != 0 {
+				return "", fmt.Errorf("git_commit: git add failed: %s", addResult.Stderr)
+			}
+
+			// Commit.
+			cmd := fmt.Sprintf("git commit -m %s", shellQuote(p.Message))
+			result, err := rt.Exec(ctx, cmd, runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if result.ExitCode != 0 {
+				return "", fmt.Errorf("git_commit: %s", result.Stderr)
+			}
+			return strings.TrimRight(result.Stdout, "\n"), nil
+		},
+	}
+}
+
+func gitBranchTool() Tool {
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "git_branch",
+			Description: "List branches or create a new branch. Omit name to list existing branches.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Name of new branch to create (omit to list branches)",
+					},
+				},
+			},
+		},
+		Execute: func(ctx context.Context, rt runtime.Runtime, args json.RawMessage) (string, error) {
+			var p struct {
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return "", fmt.Errorf("git_branch: %w", err)
+			}
+
+			var cmd string
+			if p.Name == "" {
+				cmd = "git branch -a"
+			} else {
+				cmd = fmt.Sprintf("git branch %s", shellQuote(p.Name))
+			}
+
+			result, err := rt.Exec(ctx, cmd, runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if result.ExitCode != 0 {
+				return "", fmt.Errorf("git_branch: %s", result.Stderr)
+			}
+			output := strings.TrimRight(result.Stdout, "\n")
+			if output == "" && p.Name != "" {
+				return fmt.Sprintf("created branch %s", p.Name), nil
+			}
+			return output, nil
+		},
+	}
+}
+
+func gitCheckoutTool() Tool {
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "git_checkout",
+			Description: "Switch to a different branch.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"branch": map[string]any{
+						"type":        "string",
+						"description": "Branch name to switch to",
+					},
+				},
+				"required": []string{"branch"},
+			},
+		},
+		Execute: func(ctx context.Context, rt runtime.Runtime, args json.RawMessage) (string, error) {
+			var p struct {
+				Branch string `json:"branch"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return "", fmt.Errorf("git_checkout: %w", err)
+			}
+			if p.Branch == "" {
+				return "", fmt.Errorf("git_checkout: branch is required")
+			}
+
+			cmd := fmt.Sprintf("git checkout %s", shellQuote(p.Branch))
+			result, err := rt.Exec(ctx, cmd, runtime.ExecOpts{})
+			if err != nil {
+				return "", err
+			}
+			if result.ExitCode != 0 {
+				return "", fmt.Errorf("git_checkout: %s", result.Stderr)
+			}
+			// git checkout outputs to stderr on success.
+			output := strings.TrimRight(result.Stderr, "\n")
+			if output == "" {
+				output = fmt.Sprintf("switched to branch %s", p.Branch)
+			}
+			return output, nil
+		},
+	}
 }
 
 func execTool() Tool {

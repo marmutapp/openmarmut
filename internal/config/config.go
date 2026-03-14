@@ -29,6 +29,8 @@ type AgentConfig struct {
 	ContextWindow       int      `yaml:"context_window"`       // Override provider's context window (0 = use provider default).
 	TruncationThreshold float64  `yaml:"truncation_threshold"` // Fraction at which truncation triggers (0.0–1.0, default 0.80).
 	KeepRecentTurns     int      `yaml:"keep_recent_turns"`    // Minimum recent turn pairs to preserve (default 4).
+	SessionRetentionDays int     `yaml:"session_retention_days"` // Days to keep sessions before auto-cleanup (default 30).
+	PlanProvider         string  `yaml:"plan_provider"`          // Provider name for plan mode analysis (empty = use active provider).
 }
 
 // LLMConfig holds all LLM provider configuration.

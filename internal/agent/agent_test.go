@@ -648,7 +648,7 @@ func TestRun_ToolsIncludedInRequest(t *testing.T) {
 
 	require.Len(t, mp.requests, 1)
 	tools := mp.requests[0].Tools
-	assert.Len(t, tools, 10)
+	assert.Len(t, tools, 17)
 
 	toolNames := make(map[string]bool)
 	for _, t := range tools {
@@ -713,7 +713,7 @@ func TestToolsAccessor(t *testing.T) {
 	a := New(mp, rt, testLogger)
 
 	tools := a.Tools()
-	assert.Len(t, tools, 10)
+	assert.Len(t, tools, 17)
 }
 
 func TestToolCallCallback(t *testing.T) {
@@ -984,4 +984,382 @@ func TestExecTool_WithWorkdir(t *testing.T) {
 	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"command":"ls","workdir":"sub"}`))
 	require.NoError(t, err)
 	_ = capturedOpts // The mock doesn't capture opts, but this tests the JSON parsing.
+}
+
+// --- Plan Mode Tests ---
+
+func TestRunPlan_TextOnly(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "## Plan: Add feature\n\n1. Create file", StopReason: "end"},
+		},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger)
+	result, err := a.RunPlan(context.Background(), "add a feature", nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, result.Response, "Plan:")
+	assert.Contains(t, result.Response, "Create file")
+}
+
+func TestRunPlan_UsesReadOnlyTools(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["main.go"] = []byte("package main")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`},
+				},
+			},
+			{Content: "Plan: modify main.go", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.RunPlan(context.Background(), "analyze the project", nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, result.Response, "Plan:")
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, "read_file", result.Steps[0].ToolCall.Name)
+	assert.Equal(t, "package main", result.Steps[0].Output)
+}
+
+func TestRunPlan_BlocksWriteTools(t *testing.T) {
+	rt := newMockRuntime("/project")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "write_file", Arguments: `{"path":"x.txt","content":"bad"}`},
+				},
+			},
+			{Content: "Plan done", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.RunPlan(context.Background(), "hack the project", nil)
+
+	require.NoError(t, err)
+	require.Len(t, result.Steps, 1)
+	assert.Contains(t, result.Steps[0].Error, "not available in plan mode")
+	// File should NOT have been created.
+	_, exists := rt.files["x.txt"]
+	assert.False(t, exists)
+}
+
+func TestRunPlan_DoesNotPollutHistory(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "plan text", StopReason: "end"},
+			{Content: "normal response", StopReason: "end"},
+		},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger)
+
+	// Run plan — should not add to main history.
+	_, err := a.RunPlan(context.Background(), "plan something", nil)
+	require.NoError(t, err)
+	assert.Len(t, a.History(), 1) // only system prompt
+
+	// Normal run should work fine after plan.
+	_, err = a.Run(context.Background(), "do something", nil)
+	require.NoError(t, err)
+	assert.Len(t, a.History(), 3) // system + user + assistant
+}
+
+func TestRunPlan_SystemPromptContainsPlanMode(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "plan", StopReason: "end"},
+		},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger)
+	_, err := a.RunPlan(context.Background(), "analyze", nil)
+	require.NoError(t, err)
+
+	require.Len(t, mp.requests, 1)
+	sysMsg := mp.requests[0].Messages[0]
+	assert.Equal(t, llm.RoleSystem, sysMsg.Role)
+	assert.Contains(t, sysMsg.Content, "PLAN MODE")
+	assert.Contains(t, sysMsg.Content, "ANALYSIS ONLY")
+}
+
+func TestRunPlan_OnlyReadOnlyToolDefs(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "plan", StopReason: "end"},
+		},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger)
+	_, err := a.RunPlan(context.Background(), "analyze", nil)
+	require.NoError(t, err)
+
+	require.Len(t, mp.requests, 1)
+	tools := mp.requests[0].Tools
+	for _, td := range tools {
+		assert.True(t, ReadOnlyToolNames()[td.Name],
+			"tool %q should be read-only in plan mode", td.Name)
+	}
+	// Should have exactly the read-only tools.
+	assert.Len(t, tools, len(ReadOnlyToolNames()))
+}
+
+func TestReadOnlyToolNames(t *testing.T) {
+	names := ReadOnlyToolNames()
+	assert.True(t, names["read_file"])
+	assert.True(t, names["list_dir"])
+	assert.True(t, names["grep_files"])
+	assert.True(t, names["find_files"])
+	assert.True(t, names["git_status"])
+	assert.False(t, names["write_file"])
+	assert.False(t, names["delete_file"])
+	assert.False(t, names["execute_command"])
+	assert.False(t, names["git_commit"])
+}
+
+// --- CompactHistory Tests ---
+
+func TestCompactHistory_ReducesTokens(t *testing.T) {
+	// Build a long history that will be summarized.
+	summaryText := "Summary: user asked to refactor auth module."
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: summaryText},
+		},
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger)
+
+	// Seed history with system + several turns.
+	ag.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Content: "You are a helpful assistant."},
+		{Role: llm.RoleUser, Content: "Please refactor the auth module to use JWT tokens instead of session cookies."},
+		{Role: llm.RoleAssistant, Content: "I'll refactor the auth module. Let me start by reading the current implementation..."},
+		{Role: llm.RoleUser, Content: "Also update the tests to match."},
+		{Role: llm.RoleAssistant, Content: strings.Repeat("Here is the detailed implementation with lots of code. ", 50)},
+	})
+
+	beforeEstimate := EstimateMessagesTokens(ag.History())
+
+	before, after, err := ag.CompactHistory(context.Background(), "")
+	require.NoError(t, err)
+
+	assert.Equal(t, beforeEstimate, before)
+	assert.Less(t, after, before, "compacted history should use fewer tokens")
+
+	// History should be: system + summary + compaction note.
+	history := ag.History()
+	assert.Len(t, history, 3)
+	assert.Equal(t, llm.RoleSystem, history[0].Role)
+	assert.Equal(t, llm.RoleAssistant, history[1].Role)
+	assert.Equal(t, summaryText, history[1].Content)
+	assert.Equal(t, llm.RoleUser, history[2].Role)
+	assert.Contains(t, history[2].Content, "Conversation compacted")
+}
+
+func TestCompactHistory_CustomInstruction(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "Summary with auth focus."},
+		},
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger)
+
+	ag.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Content: "System prompt."},
+		{Role: llm.RoleUser, Content: "Do something."},
+		{Role: llm.RoleAssistant, Content: "Done."},
+		{Role: llm.RoleUser, Content: "More work."},
+	})
+
+	_, _, err := ag.CompactHistory(context.Background(), "Preserve the auth changes")
+	require.NoError(t, err)
+
+	// The custom instruction should appear in the summarization request.
+	require.Len(t, mp.requests, 1)
+	systemMsg := mp.requests[0].Messages[0].Content
+	assert.Contains(t, systemMsg, "Preserve the auth changes")
+}
+
+func TestCompactHistory_TooFewMessages(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger)
+
+	// Only system + 1 message = 2 messages, below threshold.
+	ag.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Content: "System."},
+		{Role: llm.RoleUser, Content: "Hello."},
+	})
+
+	before, after, err := ag.CompactHistory(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "should return same tokens when nothing to compact")
+
+	// Provider should NOT have been called.
+	assert.Empty(t, mp.requests)
+}
+
+func TestCompactHistory_PreservesSystemPrompt(t *testing.T) {
+	systemPrompt := "You are a coding assistant with specific rules."
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "Compacted summary."},
+		},
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger)
+
+	ag.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Content: systemPrompt},
+		{Role: llm.RoleUser, Content: "Work on feature X."},
+		{Role: llm.RoleAssistant, Content: "Working on it..."},
+		{Role: llm.RoleUser, Content: "Continue."},
+	})
+
+	_, _, err := ag.CompactHistory(context.Background(), "")
+	require.NoError(t, err)
+
+	history := ag.History()
+	assert.Equal(t, systemPrompt, history[0].Content, "system prompt must be preserved")
+}
+
+func TestCompactHistory_LLMError(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		// No responses → will return error.
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger)
+
+	ag.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Content: "System."},
+		{Role: llm.RoleUser, Content: "Q1."},
+		{Role: llm.RoleAssistant, Content: "A1."},
+		{Role: llm.RoleUser, Content: "Q2."},
+	})
+
+	originalLen := len(ag.History())
+	_, _, err := ag.CompactHistory(context.Background(), "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "agent.CompactHistory")
+
+	// History should be unchanged on error.
+	assert.Len(t, ag.History(), originalLen)
+}
+
+// --- Extended Thinking Tests ---
+
+func TestExtendedThinking_Option(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "Done."},
+		},
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger, WithExtendedThinking(true, 20000))
+
+	assert.True(t, ag.ExtendedThinking())
+
+	_, err := ag.Run(context.Background(), "test", nil)
+	require.NoError(t, err)
+
+	// The request should have extended thinking enabled.
+	require.Len(t, mp.requests, 1)
+	assert.True(t, mp.requests[0].ExtendedThinking)
+	assert.Equal(t, 20000, mp.requests[0].ThinkingBudget)
+}
+
+func TestExtendedThinking_Toggle(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "R1."},
+			{Content: "R2."},
+		},
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger)
+
+	assert.False(t, ag.ExtendedThinking())
+
+	ag.SetExtendedThinking(true)
+	assert.True(t, ag.ExtendedThinking())
+
+	ag.SetThinkingBudget(5000)
+
+	_, err := ag.Run(context.Background(), "test", nil)
+	require.NoError(t, err)
+
+	require.Len(t, mp.requests, 1)
+	assert.True(t, mp.requests[0].ExtendedThinking)
+	assert.Equal(t, 5000, mp.requests[0].ThinkingBudget)
+
+	ag.SetExtendedThinking(false)
+	_, err = ag.Run(context.Background(), "test2", nil)
+	require.NoError(t, err)
+
+	require.Len(t, mp.requests, 2)
+	assert.False(t, mp.requests[1].ExtendedThinking)
+}
+
+func TestExtendedThinking_ResponseThinking(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				Content:        "The answer is 42.",
+				Thinking:       "Let me think step by step...",
+				ThinkingTokens: 150,
+			},
+		},
+	}
+	rt := newMockRuntime("/test")
+	ag := New(mp, rt, testLogger, WithExtendedThinking(true, 10000))
+
+	result, err := ag.Run(context.Background(), "What is the answer?", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "The answer is 42.", result.Response)
 }

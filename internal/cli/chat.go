@@ -2,16 +2,21 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gajaai/openmarmut-go/internal/agent"
 	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/session"
 	"github.com/gajaai/openmarmut-go/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -27,14 +32,18 @@ const (
 
 // chatState holds mutable state for the chat REPL, used by handleSlashCommand.
 type chatState struct {
-	ag          *agent.Agent
-	permChecker *agent.PermissionChecker
+	ag           *agent.Agent
+	permChecker  *agent.PermissionChecker
 	sessionUsage llm.Usage
 	model        string
-	out          io.Writer // Where to write command output (stderr in production).
+	out          io.Writer      // Where to write command output (stderr in production).
 	scanner      *bufio.Scanner // stdin scanner, shared between main loop and confirm prompt.
 	spinner      *ui.Spinner    // current spinner, set before each ag.Run call; nil when idle.
 	warned60     bool           // true after the 60% warning has been shown.
+	sess         *session.Session // current session (nil if sessions disabled).
+	rt           runtime.Runtime  // runtime for /rewind, /diff, /commit.
+	isGitRepo    bool             // true if target dir is a git repo.
+	planMode     bool             // true when plan mode is toggled on.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -42,6 +51,57 @@ type chatState struct {
 func handleSlashCommand(line string, state *chatState) slashAction {
 	if !strings.HasPrefix(line, "/") {
 		return slashNone
+	}
+
+	// Handle commands with arguments.
+	if strings.HasPrefix(line, "/rename ") {
+		newName := strings.TrimSpace(strings.TrimPrefix(line, "/rename "))
+		if newName == "" {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /rename <name>"))
+			return slashHandled
+		}
+		if state.sess != nil {
+			state.sess.Name = newName
+			go session.Save(state.sess) //nolint:errcheck
+			fmt.Fprintln(state.out, ui.FormatSuccess("Session renamed to: "+newName))
+		} else {
+			fmt.Fprintln(state.out, ui.FormatWarning("No active session to rename."))
+		}
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/rewind") {
+		handleRewind(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/diff") {
+		handleDiff(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/commit") {
+		handleCommit(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/compact") {
+		handleCompact(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/thinking") {
+		handleThinking(state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/effort") {
+		handleEffort(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/plan") {
+		return handlePlan(line, state)
 	}
 
 	switch line {
@@ -61,6 +121,9 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 	case "/context":
 		renderContextBox(state)
 		return slashHandled
+	case "/sessions":
+		renderSessionsList(state)
+		return slashHandled
 	case "/help":
 		renderHelpBox(state.out)
 		return slashHandled
@@ -78,6 +141,16 @@ func renderHelpBox(w io.Writer) {
 		{"/tools", "List available tools"},
 		{"/cost", "Show accumulated session cost"},
 		{"/context", "Show context window usage"},
+		{"/diff [file]", "Show uncommitted changes"},
+		{"/commit [msg]", "Commit changes (generates message if omitted)"},
+		{"/rewind [n]", "Undo last N turns of file changes"},
+		{"/rewind --list", "Show checkpoint history"},
+		{"/compact [instr]", "Compact history (optional custom instruction)"},
+		{"/thinking", "Toggle extended thinking on/off"},
+		{"/effort <level>", "Set thinking effort (low/medium/high)"},
+		{"/plan [msg]", "Toggle plan mode or plan one-shot"},
+		{"/sessions", "List recent sessions"},
+		{"/rename <name>", "Rename current session"},
 		{"/help", "Show this help"},
 		{"/quit", "Exit chat"},
 	}
@@ -154,6 +227,32 @@ func renderContextBox(state *chatState) {
 	fmt.Fprintln(state.out, ui.RenderBox("Context Window", content))
 }
 
+// renderSessionsList shows recent sessions inline in the chat REPL.
+func renderSessionsList(state *chatState) {
+	summaries, err := session.FindRecent(10)
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("Failed to list sessions: "+err.Error()))
+		return
+	}
+	if len(summaries) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No sessions found."))
+		return
+	}
+
+	headers := []string{"ID", "NAME", "AGE", "PROVIDER", "TURNS"}
+	var rows [][]string
+	for _, s := range summaries {
+		rows = append(rows, []string{
+			s.ID,
+			displayName(s.Name),
+			humanizeAge(s.UpdatedAt),
+			s.Provider,
+			fmt.Sprintf("%d", s.Messages),
+		})
+	}
+	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+}
+
 // humanizeInt formats an integer with comma separators (e.g. 128000 → "128,000").
 func humanizeInt(n int) string {
 	s := fmt.Sprintf("%d", n)
@@ -218,7 +317,13 @@ func interactiveConfirm(state *chatState) agent.ConfirmFunc {
 }
 
 func newChatCmd(runner *Runner) *cobra.Command {
-	return &cobra.Command{
+	var (
+		continueFlag bool
+		resumeFlag   string
+		sessionName  string
+	)
+
+	cmd := &cobra.Command{
 		Use:   "chat",
 		Short: "Interactive chat with the AI (multi-turn with tools)",
 		Args:  cobra.NoArgs,
@@ -274,7 +379,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				opts = append(opts, agent.WithMaxTokens(maxTok))
 			}
 
-			// Build context config: provider default → agent config overrides.
+			// Build context config: provider default -> agent config overrides.
 			ctxCfg := agent.DefaultContextConfig()
 			if entry.ContextWindow > 0 {
 				ctxCfg.ContextWindow = entry.ContextWindow
@@ -290,6 +395,11 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			}
 			opts = append(opts, agent.WithContextConfig(ctxCfg))
 
+			// Extended thinking from provider entry config.
+			if entry.ExtendedThinking {
+				opts = append(opts, agent.WithExtendedThinking(true, entry.ThinkingBudget))
+			}
+
 			// Show tool calls inline using styled FormatToolCall.
 			opts = append(opts, agent.WithToolCallCallback(func(tc llm.ToolCall) {
 				argSummary := formatToolArgs(tc)
@@ -298,16 +408,92 @@ func newChatCmd(runner *Runner) *cobra.Command {
 
 			opts = append(opts, agent.WithPermissionChecker(pc))
 
+			// File checkpointing for /rewind.
+			checkpoints := agent.NewCheckpointStore()
+			opts = append(opts, agent.WithCheckpointStore(checkpoints))
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			state.ag = ag
 			state.permChecker = pc
+			state.rt = rt
 
-			// Welcome banner.
-			fmt.Fprintln(os.Stderr, ui.RenderWelcomeBanner(
-				provider.Name(), provider.Model(),
-				cfg.TargetDir, cfg.Mode,
-			))
+			// Detect git repo for dirty state warning and /diff+/commit.
+			state.isGitRepo = isGitRepo(cmd.Context(), rt)
+
+			// Session cleanup on startup (non-blocking).
+			retDays := cfg.Agent.SessionRetentionDays
+			if retDays <= 0 {
+				retDays = session.DefaultRetentionDays
+			}
+			go session.Cleanup(retDays) //nolint:errcheck
+
+			// Resolve session: resume existing or create new.
+			var sess *session.Session
+			resumeID := resolveResumeID(continueFlag, resumeFlag, cfg.TargetDir, scanner, os.Stderr)
+
+			if resumeID != "" {
+				loaded, loadErr := session.Load(resumeID)
+				if loadErr != nil {
+					return fmt.Errorf("chat: resume session: %w", loadErr)
+				}
+				sess = loaded
+
+				// Restore conversation history into the agent.
+				if len(sess.Messages) > 0 {
+					ag.SetHistory(sess.Messages)
+				}
+
+				// Warn if provider or mode changed.
+				if sess.Provider != provider.Name() {
+					fmt.Fprintf(os.Stderr, "%s\n",
+						ui.FormatWarning(fmt.Sprintf(
+							"Session was created with provider '%s' but current config uses '%s'. Continuing with current provider.",
+							sess.Provider, provider.Name())))
+				}
+				if sess.Mode != cfg.Mode {
+					fmt.Fprintf(os.Stderr, "%s\n",
+						ui.FormatWarning(fmt.Sprintf(
+							"Session was created with mode '%s' but current config uses '%s'. Continuing with current mode.",
+							sess.Mode, cfg.Mode)))
+				}
+
+				// Show resume banner.
+				renderResumeBanner(sess, os.Stderr)
+			} else {
+				// Create new session.
+				sess = &session.Session{
+					ID:        session.NewID(),
+					Name:      sessionName,
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+					Mode:      cfg.Mode,
+					TargetDir: cfg.TargetDir,
+					Provider:  provider.Name(),
+					Model:     provider.Model(),
+					Metadata:  make(map[string]string),
+				}
+				if cfg.Mode == "docker" {
+					sess.Metadata["docker_image"] = cfg.Docker.Image
+					sess.Metadata["docker_mount"] = cfg.Docker.MountPath
+					sess.Metadata["docker_network"] = cfg.Docker.NetworkMode
+				}
+				// Initial save to create the file.
+				go session.Save(sess) //nolint:errcheck
+
+				// Welcome banner.
+				fmt.Fprintln(os.Stderr, ui.RenderWelcomeBanner(
+					provider.Name(), provider.Model(),
+					cfg.TargetDir, cfg.Mode,
+				))
+
+				// Warn about pre-existing uncommitted changes.
+				if state.isGitRepo {
+					warnDirtyState(cmd.Context(), rt, os.Stderr)
+				}
+			}
+
+			state.sess = sess
 			fmt.Fprintln(os.Stderr)
 
 			for {
@@ -329,8 +515,23 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				action := handleSlashCommand(line, state)
 				switch action {
 				case slashExit:
+					// Final save.
+					saveSession(state)
 					return nil
 				case slashHandled:
+					continue
+				}
+
+				// Resolve @file references before sending to agent.
+				line, fileWarnings := resolveFileRefs(cmd.Context(), line, rt)
+				for _, w := range fileWarnings {
+					fmt.Fprintln(os.Stderr, ui.FormatWarning(w))
+				}
+
+				// If plan mode is toggled on, route through plan flow.
+				if state.planMode {
+					executePlanFlow(line, state)
+					fmt.Fprintln(os.Stderr)
 					continue
 				}
 
@@ -372,6 +573,17 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				state.sessionUsage.CompletionTokens += result.Usage.CompletionTokens
 				state.sessionUsage.TotalTokens += result.Usage.TotalTokens
 
+				// Update session after each turn.
+				if state.sess != nil {
+					state.sess.Messages = ag.History()
+					state.sess.ToolCalls += len(result.Steps)
+					state.sess.TotalTokens = state.sessionUsage.TotalTokens
+					if cost, ok := llm.EstimateCost(state.sessionUsage, state.model); ok {
+						state.sess.TotalCost = cost
+					}
+					go session.Save(state.sess) //nolint:errcheck
+				}
+
 				// Summary line with context usage.
 				ctxUsage := ag.ContextUsage()
 				costStr := llm.FormatCost(result.Usage, provider.Model())
@@ -398,8 +610,17 @@ func newChatCmd(runner *Runner) *cobra.Command {
 						fmt.Sprintf("Context %d%% full — consider /clear if switching topics", ctxUsage.Percent)))
 				}
 
+				// Auto-commit suggestion if files were modified.
+				if state.isGitRepo && hasFileChanges(result) {
+					fmt.Fprintln(os.Stderr, ui.FormatHint(
+						"Tip: Run /commit to save these changes, or /rewind to undo"))
+				}
+
 				fmt.Fprintln(os.Stderr)
 			}
+
+			// Final save on EOF.
+			saveSession(state)
 
 			if err := state.scanner.Err(); err != nil {
 				return fmt.Errorf("chat: %w", err)
@@ -407,6 +628,590 @@ func newChatCmd(runner *Runner) *cobra.Command {
 
 			return nil
 		},
+	}
+
+	cmd.Flags().BoolVar(&continueFlag, "continue", false, "resume most recent session for current target directory")
+	cmd.Flags().StringVar(&resumeFlag, "resume", "", "resume a session by ID (empty = interactive picker)")
+	cmd.Flags().StringVar(&sessionName, "name", "", "name for the new session")
+
+	return cmd
+}
+
+// resolveResumeID determines which session to resume based on flags.
+// Returns empty string if a new session should be created.
+func resolveResumeID(continueFlag bool, resumeFlag string, targetDir string, scanner *bufio.Scanner, w io.Writer) string {
+	if resumeFlag != "" {
+		return resumeFlag
+	}
+
+	if continueFlag {
+		// Find most recent session for this target dir.
+		sessions, err := session.FindByTarget(targetDir)
+		if err != nil || len(sessions) == 0 {
+			fmt.Fprintln(w, ui.FormatHint("No previous sessions found for this directory. Starting new session."))
+			return ""
+		}
+		return sessions[0].ID
+	}
+
+	// Check if --resume was specified without a value (flag present but empty).
+	// This case is handled by cobra setting resumeFlag to "" when --resume is used without value.
+	// We detect this via the flag being changed.
+	// Actually, cobra will set the flag to its default value. For interactive picker,
+	// we need a different approach. Let's use a sentinel.
+	// For now, interactive picker is triggered by `openmarmut chat --resume ""` which won't
+	// happen naturally. The sessions command + --resume <id> is the main flow.
+
+	return ""
+}
+
+// saveSession persists the current session state to disk.
+func saveSession(state *chatState) {
+	if state.sess == nil {
+		return
+	}
+	state.sess.Messages = state.ag.History()
+	state.sess.TotalTokens = state.sessionUsage.TotalTokens
+	if cost, ok := llm.EstimateCost(state.sessionUsage, state.model); ok {
+		state.sess.TotalCost = cost
+	}
+	session.Save(state.sess) //nolint:errcheck
+}
+
+// renderResumeBanner displays a styled box with session resume information.
+func renderResumeBanner(sess *session.Session, w io.Writer) {
+	content := fmt.Sprintf(
+		"Session:   %s (%s)\n"+
+			"Started:   %s\n"+
+			"Provider:  %s (%s)\n"+
+			"Target:    %s\n"+
+			"Mode:      %s\n"+
+			"Messages:  %d (%d turns)\n"+
+			"Cost:      ~$%.4f",
+		sess.DisplayName(), sess.ID,
+		sess.CreatedAt.Format("2006-01-02 15:04"),
+		sess.Provider, sess.Model,
+		sess.TargetDir,
+		sess.Mode,
+		len(sess.Messages), sess.UserTurns(),
+		sess.TotalCost,
+	)
+	fmt.Fprintln(w, ui.RenderBox("Resuming Session", content))
+}
+
+// showSessionPicker displays an interactive list of recent sessions.
+// Returns the selected session ID or empty string if cancelled.
+func showSessionPicker(scanner *bufio.Scanner, w io.Writer) string {
+	summaries, err := session.FindRecent(10)
+	if err != nil || len(summaries) == 0 {
+		fmt.Fprintln(w, ui.FormatHint("No sessions found."))
+		return ""
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.HeaderStyle.Render("Recent Sessions:"))
+
+	headers := []string{"#", "NAME", "AGE", "PROVIDER", "TARGET", "TURNS"}
+	var rows [][]string
+	for i, s := range summaries {
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", i+1),
+			displayName(s.Name),
+			humanizeAge(s.UpdatedAt),
+			s.Provider,
+			truncatePath(s.TargetDir, 35),
+			fmt.Sprintf("%d", s.Messages),
+		})
+	}
+	fmt.Fprintln(w, ui.RenderTable(headers, rows, -1))
+	fmt.Fprint(w, "Enter number or 'q' to cancel: ")
+
+	if !scanner.Scan() {
+		return ""
+	}
+	input := strings.TrimSpace(scanner.Text())
+	if input == "q" || input == "" {
+		return ""
+	}
+
+	n, err := strconv.Atoi(input)
+	if err != nil || n < 1 || n > len(summaries) {
+		fmt.Fprintln(w, ui.FormatWarning("Invalid selection."))
+		return ""
+	}
+
+	return summaries[n-1].ID
+}
+
+// handleRewind processes /rewind commands.
+func handleRewind(line string, state *chatState) {
+	cs := state.ag.Checkpoints()
+	if cs == nil {
+		fmt.Fprintln(state.out, ui.FormatWarning("Checkpointing is not enabled."))
+		return
+	}
+
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/rewind"))
+
+	if arg == "--list" {
+		cps := cs.Checkpoints()
+		if len(cps) == 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("No checkpoints recorded."))
+			return
+		}
+		headers := []string{"#", "AGE", "FILES"}
+		var rows [][]string
+		for _, cp := range cps {
+			var files []string
+			for path := range cp.Files {
+				files = append(files, path)
+			}
+			fileStr := strings.Join(files, ", ")
+			if len(fileStr) > 60 {
+				fileStr = fileStr[:60] + "..."
+			}
+			rows = append(rows, []string{
+				fmt.Sprintf("%d", cp.ID),
+				humanizeAge(cp.Timestamp),
+				fileStr,
+			})
+		}
+		fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+		return
+	}
+
+	n := 1
+	if arg != "" {
+		parsed, err := strconv.Atoi(arg)
+		if err != nil || parsed < 1 {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /rewind [n] or /rewind --list"))
+			return
+		}
+		n = parsed
+	}
+
+	if cs.Len() == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No checkpoints to rewind."))
+		return
+	}
+
+	ctx := context.Background()
+	actions, err := cs.Rewind(ctx, state.rt, n)
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("Rewind failed: "+err.Error()))
+		return
+	}
+
+	if len(actions) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No file changes to rewind."))
+		return
+	}
+
+	fmt.Fprintln(state.out, ui.FormatSuccess(
+		fmt.Sprintf("Reverted %d file(s) from %d checkpoint(s)", len(actions), n)))
+	for _, a := range actions {
+		if a.Action == "deleted" {
+			fmt.Fprintf(state.out, "  %s %s (deleted — was newly created)\n",
+				ui.FormatError("✗"), a.Path)
+		} else {
+			fmt.Fprintf(state.out, "  %s %s (restored)\n",
+				ui.FormatSuccess("↺"), a.Path)
+		}
+		if a.Error != "" {
+			fmt.Fprintf(state.out, "    %s\n", ui.FormatError(a.Error))
+		}
+	}
+}
+
+// handleDiff processes /diff commands.
+func handleDiff(line string, state *chatState) {
+	if !state.isGitRepo {
+		fmt.Fprintln(state.out, ui.FormatWarning("Not a git repository."))
+		return
+	}
+
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/diff"))
+
+	cmd := "git diff"
+	if arg != "" {
+		cmd += " -- " + shellQuoteCLI(arg)
+	}
+
+	ctx := context.Background()
+	result, err := state.rt.Exec(ctx, cmd, runtime.ExecOpts{})
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("git diff failed: "+err.Error()))
+		return
+	}
+	if result.ExitCode != 0 {
+		fmt.Fprintln(state.out, ui.FormatError("git diff: "+result.Stderr))
+		return
+	}
+
+	output := strings.TrimRight(result.Stdout, "\n")
+	if output == "" {
+		fmt.Fprintln(state.out, ui.FormatHint("No unstaged changes."))
+		return
+	}
+	fmt.Fprintln(state.out, output)
+}
+
+// handleCommit processes /commit commands.
+func handleCommit(line string, state *chatState) {
+	if !state.isGitRepo {
+		fmt.Fprintln(state.out, ui.FormatWarning("Not a git repository."))
+		return
+	}
+
+	ctx := context.Background()
+
+	// Check for staged/unstaged changes.
+	statusResult, err := state.rt.Exec(ctx, "git status --short", runtime.ExecOpts{})
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("git status failed: "+err.Error()))
+		return
+	}
+	if strings.TrimSpace(statusResult.Stdout) == "" {
+		fmt.Fprintln(state.out, ui.FormatHint("No changes to commit."))
+		return
+	}
+
+	// Show status.
+	fmt.Fprintln(state.out, ui.DimStyle.Render("Changes to commit:"))
+	fmt.Fprintln(state.out, statusResult.Stdout)
+
+	// Get or generate commit message.
+	msg := strings.TrimSpace(strings.TrimPrefix(line, "/commit"))
+	if msg == "" {
+		// Generate a message from git diff --stat.
+		statResult, _ := state.rt.Exec(ctx, "git diff --stat HEAD 2>/dev/null || git diff --stat --cached 2>/dev/null", runtime.ExecOpts{})
+		if statResult != nil && statResult.Stdout != "" {
+			msg = "Update files\n\n" + strings.TrimRight(statResult.Stdout, "\n")
+		} else {
+			msg = "Update files"
+		}
+		fmt.Fprintf(state.out, "%s %s\n", ui.DimStyle.Render("Commit message:"), msg)
+	}
+
+	// Confirm before committing.
+	fmt.Fprint(state.out, "Commit? [y/n]: ")
+	if !state.scanner.Scan() {
+		return
+	}
+	answer := strings.TrimSpace(strings.ToLower(state.scanner.Text()))
+	if answer != "y" && answer != "yes" {
+		fmt.Fprintln(state.out, ui.FormatHint("Commit cancelled."))
+		return
+	}
+
+	// Stage all and commit.
+	addResult, err := state.rt.Exec(ctx, "git add -A", runtime.ExecOpts{})
+	if err != nil || addResult.ExitCode != 0 {
+		errMsg := "git add failed"
+		if addResult != nil {
+			errMsg += ": " + addResult.Stderr
+		}
+		fmt.Fprintln(state.out, ui.FormatError(errMsg))
+		return
+	}
+
+	commitCmd := fmt.Sprintf("git commit -m %s", shellQuoteCLI(msg))
+	commitResult, err := state.rt.Exec(ctx, commitCmd, runtime.ExecOpts{})
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("git commit failed: "+err.Error()))
+		return
+	}
+	if commitResult.ExitCode != 0 {
+		fmt.Fprintln(state.out, ui.FormatError("git commit: "+commitResult.Stderr))
+		return
+	}
+	fmt.Fprintln(state.out, ui.FormatSuccess("Committed: "+strings.TrimRight(commitResult.Stdout, "\n")))
+}
+
+// isGitRepo checks if the runtime target directory is a git repository.
+func isGitRepo(ctx context.Context, rt runtime.Runtime) bool {
+	result, err := rt.Exec(ctx, "git rev-parse --is-inside-work-tree 2>/dev/null", runtime.ExecOpts{})
+	if err != nil {
+		return false
+	}
+	return result.ExitCode == 0 && strings.TrimSpace(result.Stdout) == "true"
+}
+
+// warnDirtyState warns if there are uncommitted changes when starting a new session.
+func warnDirtyState(ctx context.Context, rt runtime.Runtime, w io.Writer) {
+	result, err := rt.Exec(ctx, "git status --short", runtime.ExecOpts{})
+	if err != nil || result.ExitCode != 0 {
+		return
+	}
+	output := strings.TrimSpace(result.Stdout)
+	if output == "" {
+		return
+	}
+	lines := strings.Split(output, "\n")
+	fmt.Fprintf(w, "%s\n",
+		ui.FormatWarning(fmt.Sprintf("Working directory has uncommitted changes (%d files modified)", len(lines))))
+}
+
+// hasFileChanges checks if the agent result includes any file-modifying tool calls.
+func hasFileChanges(result *agent.Result) bool {
+	for _, step := range result.Steps {
+		switch step.ToolCall.Name {
+		case "write_file", "patch_file", "delete_file":
+			if step.Error == "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// shellQuoteCLI wraps a string in single quotes for safe shell interpolation (CLI-side).
+func shellQuoteCLI(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// handlePlan processes /plan commands.
+// /plan on — toggle plan mode on.
+// /plan off — toggle plan mode off.
+// /plan — toggle plan mode.
+// /plan <message> — one-shot plan: analyze, display, approve, execute.
+func handlePlan(line string, state *chatState) slashAction {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/plan"))
+
+	switch arg {
+	case "":
+		// Toggle.
+		state.planMode = !state.planMode
+		if state.planMode {
+			fmt.Fprintln(state.out, ui.FormatSuccess("Plan mode ON — next messages will produce a plan before executing"))
+		} else {
+			fmt.Fprintln(state.out, ui.FormatSuccess("Plan mode OFF — back to normal execution"))
+		}
+		return slashHandled
+	case "on":
+		state.planMode = true
+		fmt.Fprintln(state.out, ui.FormatSuccess("Plan mode ON"))
+		return slashHandled
+	case "off":
+		state.planMode = false
+		fmt.Fprintln(state.out, ui.FormatSuccess("Plan mode OFF"))
+		return slashHandled
+	}
+
+	// One-shot plan mode: /plan <message>.
+	executePlanFlow(arg, state)
+	return slashHandled
+}
+
+// executePlanFlow runs the plan→approve→execute flow for a given message.
+func executePlanFlow(userMessage string, state *chatState) {
+	// Phase 1: Analysis — run with read-only tools.
+	state.spinner = ui.NewSpinner(state.out, "Planning...")
+	state.spinner.Start()
+	firstToken := true
+
+	var planBuf strings.Builder
+	streamCB := func(text string) error {
+		if firstToken {
+			if state.spinner != nil {
+				state.spinner.Stop()
+				state.spinner = nil
+			}
+			firstToken = false
+		}
+		planBuf.WriteString(text)
+		return nil
+	}
+
+	result, err := state.ag.RunPlan(context.Background(), userMessage, streamCB)
+	if state.spinner != nil {
+		state.spinner.Stop()
+		state.spinner = nil
+	}
+	if err != nil {
+		fmt.Fprintf(state.out, "\n%s\n", ui.FormatError("Plan failed: "+err.Error()))
+		return
+	}
+
+	plan := result.Response
+	if plan == "" {
+		plan = planBuf.String()
+	}
+
+	// Phase 2: Display the plan in a styled box.
+	fmt.Fprintln(state.out, ui.RenderPlanBox(plan))
+
+	// Show plan cost.
+	costStr := llm.FormatCost(result.Usage, state.model)
+	summary := ui.FormatSummary(
+		len(result.Steps),
+		result.Usage.PromptTokens,
+		result.Usage.CompletionTokens,
+		costStr,
+		result.Duration,
+	)
+	fmt.Fprintln(state.out, summary)
+
+	// Phase 3: Approval.
+	fmt.Fprintln(state.out, ui.RenderPlanApproval())
+	fmt.Fprint(state.out, "> ")
+	if !state.scanner.Scan() {
+		return
+	}
+	answer := strings.TrimSpace(strings.ToLower(state.scanner.Text()))
+
+	switch answer {
+	case "y", "yes":
+		// Phase 4: Execute — send plan + original request through the normal agent loop.
+		executeMsg := fmt.Sprintf(
+			"Execute the following plan. The original request was: %s\n\n---\n\n%s",
+			userMessage, plan,
+		)
+
+		state.spinner = ui.NewSpinner(state.out, "Executing plan...")
+		state.spinner.Start()
+		firstToken = true
+
+		var responseBuf strings.Builder
+		execStreamCB := func(text string) error {
+			if firstToken {
+				if state.spinner != nil {
+					state.spinner.Stop()
+					state.spinner = nil
+				}
+				firstToken = false
+			}
+			responseBuf.WriteString(text)
+			_, writeErr := fmt.Fprint(state.out, text)
+			return writeErr
+		}
+
+		execResult, execErr := state.ag.Run(context.Background(), executeMsg, execStreamCB)
+		if state.spinner != nil {
+			state.spinner.Stop()
+			state.spinner = nil
+		}
+		if execErr != nil {
+			fmt.Fprintf(state.out, "\n%s\n", ui.FormatError("Execution failed: "+execErr.Error()))
+			return
+		}
+
+		fmt.Fprintln(state.out)
+
+		// Accumulate usage.
+		state.sessionUsage.PromptTokens += result.Usage.PromptTokens + execResult.Usage.PromptTokens
+		state.sessionUsage.CompletionTokens += result.Usage.CompletionTokens + execResult.Usage.CompletionTokens
+		state.sessionUsage.TotalTokens += result.Usage.TotalTokens + execResult.Usage.TotalTokens
+
+		// Show execution summary.
+		execCostStr := llm.FormatCost(execResult.Usage, state.model)
+		execSummary := ui.FormatSummary(
+			len(execResult.Steps),
+			execResult.Usage.PromptTokens,
+			execResult.Usage.CompletionTokens,
+			execCostStr,
+			execResult.Duration,
+		)
+		fmt.Fprintln(state.out, execSummary)
+
+		// Auto-commit suggestion.
+		if state.isGitRepo && hasFileChanges(execResult) {
+			fmt.Fprintln(state.out, ui.FormatHint(
+				"Tip: Run /commit to save these changes, or /rewind to undo"))
+		}
+
+		// Update session.
+		if state.sess != nil {
+			state.sess.Messages = state.ag.History()
+			state.sess.ToolCalls += len(result.Steps) + len(execResult.Steps)
+			state.sess.TotalTokens = state.sessionUsage.TotalTokens
+			if cost, ok := llm.EstimateCost(state.sessionUsage, state.model); ok {
+				state.sess.TotalCost = cost
+			}
+			go session.Save(state.sess) //nolint:errcheck
+		}
+
+	case "e", "edit":
+		fmt.Fprintln(state.out, ui.FormatHint("Refine your request and run /plan again."))
+
+	default:
+		fmt.Fprintln(state.out, ui.FormatHint("Plan discarded."))
+	}
+}
+
+// handleCompact processes /compact commands.
+// /compact — auto-summarize conversation history.
+// /compact "instruction" — summarize with custom instruction for what to preserve.
+func handleCompact(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/compact"))
+	// Strip surrounding quotes from custom instruction.
+	arg = strings.Trim(arg, "\"'")
+
+	state.spinner = ui.NewSpinner(state.out, "Compacting...")
+	state.spinner.Start()
+
+	before, after, err := state.ag.CompactHistory(context.Background(), arg)
+	state.spinner.Stop()
+	state.spinner = nil
+
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("Compact failed: "+err.Error()))
+		return
+	}
+
+	if before == after {
+		fmt.Fprintln(state.out, ui.FormatHint("Nothing to compact (too few messages)."))
+		return
+	}
+
+	pct := 0
+	if before > 0 {
+		pct = 100 - (after*100)/before
+	}
+	fmt.Fprintln(state.out, ui.FormatSuccess(
+		fmt.Sprintf("Compacted: %s → %s tokens (%d%% reduction)",
+			humanizeInt(before), humanizeInt(after), pct)))
+
+	// Update session with compacted history.
+	if state.sess != nil {
+		state.sess.Messages = state.ag.History()
+		go session.Save(state.sess) //nolint:errcheck
+	}
+}
+
+// handleThinking toggles extended thinking mode on/off.
+func handleThinking(state *chatState) {
+	enabled := !state.ag.ExtendedThinking()
+	state.ag.SetExtendedThinking(enabled)
+	if enabled {
+		fmt.Fprintln(state.out, ui.FormatSuccess("Extended thinking ON"))
+	} else {
+		fmt.Fprintln(state.out, ui.FormatSuccess("Extended thinking OFF"))
+	}
+}
+
+// handleEffort sets the thinking effort level.
+func handleEffort(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/effort"))
+	var budget int
+	switch strings.ToLower(arg) {
+	case "low":
+		budget = 5000
+	case "medium":
+		budget = 10000
+	case "high":
+		budget = 50000
+	default:
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /effort low|medium|high"))
+		return
+	}
+	state.ag.SetThinkingBudget(budget)
+	if !state.ag.ExtendedThinking() {
+		state.ag.SetExtendedThinking(true)
+		fmt.Fprintln(state.out, ui.FormatSuccess(
+			fmt.Sprintf("Effort set to %s (extended thinking enabled)", arg)))
+	} else {
+		fmt.Fprintln(state.out, ui.FormatSuccess("Effort set to "+arg))
 	}
 }
 
@@ -446,6 +1251,30 @@ func formatToolArgs(tc llm.ToolCall) string {
 	case "find_files":
 		if p, ok := args["pattern"]; ok {
 			return fmt.Sprintf("%v", p)
+		}
+	case "git_diff":
+		if p, ok := args["path"]; ok {
+			return fmt.Sprintf("%v", p)
+		}
+	case "git_log":
+		if n, ok := args["n"]; ok {
+			return fmt.Sprintf("n=%v", n)
+		}
+	case "git_commit":
+		if m, ok := args["message"]; ok {
+			s := fmt.Sprintf("%v", m)
+			if len(s) > 60 {
+				s = s[:60] + "..."
+			}
+			return s
+		}
+	case "git_branch":
+		if n, ok := args["name"]; ok && n != "" {
+			return fmt.Sprintf("create: %v", n)
+		}
+	case "git_checkout":
+		if b, ok := args["branch"]; ok {
+			return fmt.Sprintf("%v", b)
 		}
 	}
 

@@ -81,6 +81,7 @@ func NewRootCmd() *cobra.Command {
 		newProvidersCmd(runner),
 		newAskCmd(runner),
 		newChatCmd(runner),
+		newSessionsCmd(),
 	)
 
 	return root
