@@ -245,3 +245,85 @@ func TestRenderMarkdown_WithColor(t *testing.T) {
 	assert.Contains(t, result, "Hello")
 	assert.Contains(t, result, "code")
 }
+
+func TestFormatContextPercent(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	tests := []struct {
+		pct      int
+		expected string
+	}{
+		{0, "ctx: 0%"},
+		{45, "ctx: 45%"},
+		{65, "ctx: 65%"},
+		{85, "ctx: 85%"},
+		{100, "ctx: 100%"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, FormatContextPercent(tt.pct))
+		})
+	}
+}
+
+func TestFormatContextPercent_ColorCoded(t *testing.T) {
+	overrideTTY(true)
+	defer overrideTTY(false)
+
+	// Green for low usage.
+	low := FormatContextPercent(30)
+	assert.Contains(t, low, "ctx: 30%")
+	assert.Contains(t, low, "\033[") // has ANSI
+
+	// Yellow for medium.
+	mid := FormatContextPercent(65)
+	assert.Contains(t, mid, "ctx: 65%")
+
+	// Red for high.
+	high := FormatContextPercent(85)
+	assert.Contains(t, high, "ctx: 85%")
+}
+
+func TestRenderProgressBar(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	bar := RenderProgressBar(50, 20)
+	assert.Contains(t, bar, "50%")
+	// 50% of 20 = 10 filled blocks.
+	assert.Contains(t, bar, "██████████")
+	assert.Contains(t, bar, "░░░░░░░░░░")
+}
+
+func TestRenderProgressBar_Bounds(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	// 0% should be all empty.
+	bar0 := RenderProgressBar(0, 10)
+	assert.Contains(t, bar0, "░░░░░░░░░░")
+	assert.Contains(t, bar0, "0%")
+
+	// 100% should be all filled.
+	bar100 := RenderProgressBar(100, 10)
+	assert.Contains(t, bar100, "██████████")
+	assert.Contains(t, bar100, "100%")
+}
+
+func TestFormatSummary_WithContextPct(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	result := FormatSummary(2, 100, 50, "$0.01", 2*time.Second, 14)
+	assert.Contains(t, result, "ctx: 14%")
+	assert.Contains(t, result, "2 tool calls")
+}
+
+func TestFormatSummary_WithoutContextPct(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	result := FormatSummary(0, 100, 50, "", time.Second)
+	assert.NotContains(t, result, "ctx:")
+}

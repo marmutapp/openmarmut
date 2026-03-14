@@ -46,10 +46,11 @@ var ErrMaxIterations = errors.New("agent: max iterations reached")
 
 // Result holds the outcome of an agent run.
 type Result struct {
-	Response string        // Final text response from the model.
-	Steps    []Step        // Executed tool calls and their results.
-	Usage    llm.Usage     // Aggregated token usage across all turns.
-	Duration time.Duration // Wall clock time for all LLM calls (excludes tool execution).
+	Response  string        // Final text response from the model.
+	Steps     []Step        // Executed tool calls and their results.
+	Usage     llm.Usage     // Aggregated token usage across all turns.
+	Duration  time.Duration // Wall clock time for all LLM calls (excludes tool execution).
+	Truncated bool          // True if history was truncated during this run.
 }
 
 // Step records one tool invocation within an agent run.
@@ -171,7 +172,11 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 
 	for i := 0; i < a.maxIterations; i++ {
 		// Truncate history if approaching context window limit.
+		prevLen := len(a.history)
 		a.history = TruncateHistory(a.history, a.contextCfg)
+		if len(a.history) < prevLen {
+			result.Truncated = true
+		}
 
 		req := llm.Request{
 			Messages:    a.history,
@@ -253,6 +258,11 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 				} else {
 					// Redact credentials in tool output before sending back to LLM.
 					output = RedactCredentials(output, a.credentialKeys)
+					// Truncate oversized tool results to fit context window.
+					maxToolTokens := a.contextCfg.ContextWindow / 4
+					if maxToolTokens > 0 {
+						output = TruncateLargeToolResult(output, maxToolTokens)
+					}
 					step.Output = output
 					a.logger.Debug("tool executed", "tool", tc.Name)
 				}
@@ -284,6 +294,16 @@ func (a *Agent) ClearHistory() {
 	a.history = []llm.Message{
 		{Role: llm.RoleSystem, Content: a.systemPrompt},
 	}
+}
+
+// ContextUsage returns the current context window usage.
+func (a *Agent) ContextUsage() ContextUsageInfo {
+	return ComputeContextUsage(a.history, a.contextCfg)
+}
+
+// ContextConfig returns the agent's context configuration.
+func (a *Agent) ContextConfig() ContextConfig {
+	return a.contextCfg
 }
 
 // Tools returns the agent's available tools.

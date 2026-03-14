@@ -22,10 +22,13 @@ type Config struct {
 	Agent          AgentConfig   `yaml:"agent"`
 }
 
-// AgentConfig holds agent-level settings for tool permissions.
+// AgentConfig holds agent-level settings for tool permissions and context management.
 type AgentConfig struct {
-	AutoAllow []string `yaml:"auto_allow"` // Tool names that execute without confirmation.
-	Confirm   []string `yaml:"confirm"`    // Tool names that require user confirmation.
+	AutoAllow           []string `yaml:"auto_allow"`           // Tool names that execute without confirmation.
+	Confirm             []string `yaml:"confirm"`              // Tool names that require user confirmation.
+	ContextWindow       int      `yaml:"context_window"`       // Override provider's context window (0 = use provider default).
+	TruncationThreshold float64  `yaml:"truncation_threshold"` // Fraction at which truncation triggers (0.0–1.0, default 0.80).
+	KeepRecentTurns     int      `yaml:"keep_recent_turns"`    // Minimum recent turn pairs to preserve (default 4).
 }
 
 // LLMConfig holds all LLM provider configuration.

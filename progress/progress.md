@@ -198,6 +198,23 @@
 - [x] New style helpers: FormatHint, FormatProviderType, FormatPermission, FormatDirEntry, RenderCodeBlock, TruncateEnd
 - [x] All 17 packages pass
 
+### Phase 10.5: Context Window Visibility & Robustness
+- [x] Verified existing context management: token estimation, 80% threshold truncation, system prompt + last N turns preserved
+- [x] `ContextConfig.KeepRecentTurns` — configurable (was hardcoded `minKeepTurns=4`), falls back to default if 0
+- [x] `ComputeContextUsage` — returns ContextUsageInfo (tokens, window, percent, threshold, turns, system tokens)
+- [x] `TruncateLargeToolResult` — truncates oversized tool outputs (>25% of context window) with head+tail and marker
+- [x] `Result.Truncated` — agent signals when history truncation occurred during a run
+- [x] Context % in summary line — `[2 tool calls │ 1451+427=1878 tokens │ ~$0.002 │ 3.2s │ ctx: 14%]`
+- [x] Color-coded context: green <60%, yellow 60-79%, red 80%+
+- [x] Auto-truncation notification — `⚠ Context at N% — older messages summarized to free space`
+- [x] Proactive 60% warning — one-time dim hint to /clear if switching topics
+- [x] `/context` slash command — styled box with model window, usage, turns, system tokens, threshold, progress bar
+- [x] `RenderProgressBar` — ██████░░░░░░ N% with color coding
+- [x] `AgentConfig` context fields — `context_window`, `truncation_threshold`, `keep_recent_turns` in .openmarmut.yaml
+- [x] Config precedence: provider default → agent config override
+- [x] `/help` updated with `/context`
+- [x] 17 new tests (context_test.go + styles_test.go + chat_test.go), all 17 packages pass
+
 ---
 
 ## Completion Criteria
@@ -240,5 +257,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 10.2 | UI style system: internal/ui package with tty.go (TTY/NO_COLOR detection, lipgloss profile sync), styles.go (6 colors, 15 named styles, 9 helpers), spinner.go (braille animation, goroutine-based). 23 tests. Dependencies: lipgloss + glamour. All 17 packages pass. | Wire UI into CLI commands
 2026-03-15 | Phase 10.3 | Chat REPL styled UI: welcome banner, UserPromptStyle, FormatToolCall, ConfirmBox permission prompts, FormatSummary, spinner, styled /help+/tools+/cost+/clear. New helpers: RenderWelcomeBanner, RenderConfirmBox, RenderMarkdown. 25 new tests. All 17 packages pass. | Phase 10.4: remaining CLI commands
 2026-03-15 | Phase 10.4 | All CLI commands styled: ask (spinner+summary), providers (color-coded table), ls (permissions+HumanizeBytes), info (RenderBox), read (syntax highlighting), errors.go (hints). Phase 10 complete. | Done
+2026-03-15 | Phase 10.5 | Context window visibility: /context command, ctx% in summary, truncation notifications, 60% proactive warning, color-coded progress bar, configurable KeepRecentTurns/TruncationThreshold, TruncateLargeToolResult for oversized outputs, AgentConfig context fields. 17 new tests. | Done
 
 <!-- Claude: append a new line here after each working session -->

@@ -34,6 +34,7 @@ type chatState struct {
 	out          io.Writer // Where to write command output (stderr in production).
 	scanner      *bufio.Scanner // stdin scanner, shared between main loop and confirm prompt.
 	spinner      *ui.Spinner    // current spinner, set before each ag.Run call; nil when idle.
+	warned60     bool           // true after the 60% warning has been shown.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -57,6 +58,9 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 	case "/cost":
 		renderCostBox(state)
 		return slashHandled
+	case "/context":
+		renderContextBox(state)
+		return slashHandled
 	case "/help":
 		renderHelpBox(state.out)
 		return slashHandled
@@ -73,6 +77,7 @@ func renderHelpBox(w io.Writer) {
 		{"/clear", "Reset conversation history"},
 		{"/tools", "List available tools"},
 		{"/cost", "Show accumulated session cost"},
+		{"/context", "Show context window usage"},
 		{"/help", "Show this help"},
 		{"/quit", "Exit chat"},
 	}
@@ -123,6 +128,46 @@ func renderCostBox(state *chatState) {
 		costStr,
 	)
 	fmt.Fprintln(state.out, ui.RenderBox("Session Cost", content))
+}
+
+// renderContextBox displays detailed context window usage in a styled box.
+func renderContextBox(state *chatState) {
+	usage := state.ag.ContextUsage()
+	cfg := state.ag.ContextConfig()
+
+	content := fmt.Sprintf(
+		"Model window:    %s tokens\n"+
+			"Current usage:   ~%s tokens (%d%%)\n"+
+			"History turns:   %d\n"+
+			"System prompt:   ~%s tokens\n"+
+			"Threshold:       %d%% (%s tokens)\n"+
+			"\n%s",
+		humanizeInt(usage.ContextWindow),
+		humanizeInt(usage.EstimatedTokens),
+		usage.Percent,
+		usage.HistoryTurns,
+		humanizeInt(usage.SystemTokens),
+		int(cfg.TruncationRatio*100),
+		humanizeInt(usage.Threshold),
+		ui.RenderProgressBar(usage.Percent, 30),
+	)
+	fmt.Fprintln(state.out, ui.RenderBox("Context Window", content))
+}
+
+// humanizeInt formats an integer with comma separators (e.g. 128000 → "128,000").
+func humanizeInt(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var result []byte
+	for i, ch := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, byte(ch))
+	}
+	return string(result)
 }
 
 // interactiveConfirm creates a ConfirmFunc that prompts the user on stderr/stdin
@@ -229,12 +274,21 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				opts = append(opts, agent.WithMaxTokens(maxTok))
 			}
 
+			// Build context config: provider default → agent config overrides.
+			ctxCfg := agent.DefaultContextConfig()
 			if entry.ContextWindow > 0 {
-				opts = append(opts, agent.WithContextConfig(agent.ContextConfig{
-					ContextWindow:   entry.ContextWindow,
-					TruncationRatio: 0.80,
-				}))
+				ctxCfg.ContextWindow = entry.ContextWindow
 			}
+			if cfg.Agent.ContextWindow > 0 {
+				ctxCfg.ContextWindow = cfg.Agent.ContextWindow
+			}
+			if cfg.Agent.TruncationThreshold > 0 {
+				ctxCfg.TruncationRatio = cfg.Agent.TruncationThreshold
+			}
+			if cfg.Agent.KeepRecentTurns > 0 {
+				ctxCfg.KeepRecentTurns = cfg.Agent.KeepRecentTurns
+			}
+			opts = append(opts, agent.WithContextConfig(ctxCfg))
 
 			// Show tool calls inline using styled FormatToolCall.
 			opts = append(opts, agent.WithToolCallCallback(func(tc llm.ToolCall) {
@@ -318,7 +372,8 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				state.sessionUsage.CompletionTokens += result.Usage.CompletionTokens
 				state.sessionUsage.TotalTokens += result.Usage.TotalTokens
 
-				// Summary line.
+				// Summary line with context usage.
+				ctxUsage := ag.ContextUsage()
 				costStr := llm.FormatCost(result.Usage, provider.Model())
 				summary := ui.FormatSummary(
 					len(result.Steps),
@@ -326,8 +381,23 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					result.Usage.CompletionTokens,
 					costStr,
 					result.Duration,
+					ctxUsage.Percent,
 				)
 				fmt.Fprintln(os.Stderr, summary)
+
+				// Truncation notification.
+				if result.Truncated {
+					fmt.Fprintln(os.Stderr, ui.FormatWarning(
+						fmt.Sprintf("Context at %d%% — older messages summarized to free space", ctxUsage.Percent)))
+				}
+
+				// Proactive 60% warning (one-time).
+				if ctxUsage.Percent >= 60 && ctxUsage.Percent < 80 && !state.warned60 {
+					state.warned60 = true
+					fmt.Fprintln(os.Stderr, ui.FormatHint(
+						fmt.Sprintf("Context %d%% full — consider /clear if switching topics", ctxUsage.Percent)))
+				}
+
 				fmt.Fprintln(os.Stderr)
 			}
 

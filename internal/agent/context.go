@@ -44,6 +44,7 @@ func EstimateMessagesTokens(msgs []llm.Message) int {
 type ContextConfig struct {
 	ContextWindow    int     // Model's context window size in tokens.
 	TruncationRatio  float64 // Fraction of window that triggers truncation (0.0–1.0).
+	KeepRecentTurns  int     // Minimum recent turn pairs to preserve during truncation.
 }
 
 // DefaultContextConfig returns sensible defaults.
@@ -51,6 +52,7 @@ func DefaultContextConfig() ContextConfig {
 	return ContextConfig{
 		ContextWindow:   defaultContextWindow,
 		TruncationRatio: defaultTruncationRatio,
+		KeepRecentTurns: minKeepTurns,
 	}
 }
 
@@ -82,7 +84,11 @@ func TruncateHistory(history []llm.Message, cfg ContextConfig) []llm.Message {
 
 	// Find split point: keep system prompt + last N turns.
 	// Count turns from the end: a "turn" is user+assistant (possibly with tool messages between).
-	keepFromEnd := countTailMessages(history, minKeepTurns)
+	keepTurns := cfg.KeepRecentTurns
+	if keepTurns <= 0 {
+		keepTurns = minKeepTurns
+	}
+	keepFromEnd := countTailMessages(history, keepTurns)
 	splitIdx := len(history) - keepFromEnd
 
 	// Must keep at least the system message.
@@ -166,4 +172,79 @@ func summarizeMessages(msgs []llm.Message) string {
 	}
 
 	return b.String()
+}
+
+// ContextUsageInfo holds computed context window usage.
+type ContextUsageInfo struct {
+	EstimatedTokens int // Estimated tokens currently in history.
+	ContextWindow   int // Total context window size.
+	Percent         int // Usage as 0–100 percentage.
+	Threshold       int // Truncation threshold in tokens.
+	HistoryTurns    int // Number of user turns in history.
+	SystemTokens    int // Estimated tokens in system prompt.
+}
+
+// ComputeContextUsage calculates context window usage from the current history.
+func ComputeContextUsage(history []llm.Message, cfg ContextConfig) ContextUsageInfo {
+	if cfg.ContextWindow <= 0 {
+		cfg.ContextWindow = defaultContextWindow
+	}
+	if cfg.TruncationRatio <= 0 || cfg.TruncationRatio > 1 {
+		cfg.TruncationRatio = defaultTruncationRatio
+	}
+
+	tokens := EstimateMessagesTokens(history)
+	pct := 0
+	if cfg.ContextWindow > 0 {
+		pct = (tokens * 100) / cfg.ContextWindow
+		if pct > 100 {
+			pct = 100
+		}
+	}
+
+	var sysTok int
+	var turns int
+	for _, m := range history {
+		if m.Role == llm.RoleSystem {
+			sysTok += EstimateTokens(m.Content) + 4
+		}
+		if m.Role == llm.RoleUser {
+			turns++
+		}
+	}
+
+	return ContextUsageInfo{
+		EstimatedTokens: tokens,
+		ContextWindow:   cfg.ContextWindow,
+		Percent:         pct,
+		Threshold:       int(float64(cfg.ContextWindow) * cfg.TruncationRatio),
+		HistoryTurns:    turns,
+		SystemTokens:    sysTok,
+	}
+}
+
+// TruncateLargeToolResult truncates a tool result string if it exceeds
+// maxTokens (estimated). Keeps the head and tail with a truncation marker.
+// Returns the original string if it fits within the budget.
+func TruncateLargeToolResult(output string, maxTokens int) string {
+	if maxTokens <= 0 || EstimateTokens(output) <= maxTokens {
+		return output
+	}
+
+	// Convert token budget to approximate char budget (4 chars per token).
+	maxChars := maxTokens * 4
+	if maxChars >= len(output) {
+		return output
+	}
+
+	// Keep 60% from head, 20% from tail, 20% for marker.
+	headChars := maxChars * 60 / 100
+	tailChars := maxChars * 20 / 100
+
+	origLen := len(output)
+
+	marker := fmt.Sprintf("\n\n[output truncated to fit context window — %d of %d chars shown]\n\n",
+		headChars+tailChars, origLen)
+
+	return output[:headChars] + marker + output[origLen-tailChars:]
 }

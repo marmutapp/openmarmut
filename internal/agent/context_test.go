@@ -213,6 +213,74 @@ func TestSummarizeMessages_LongSnippetsTruncated(t *testing.T) {
 	assert.Less(t, len(summary), 400)
 }
 
+func TestTruncateHistory_CustomKeepTurns(t *testing.T) {
+	longContent := strings.Repeat("x", 4000)
+	history := []llm.Message{
+		{Role: llm.RoleSystem, Content: "sys"},
+		{Role: llm.RoleUser, Content: longContent},
+		{Role: llm.RoleAssistant, Content: longContent},
+		{Role: llm.RoleUser, Content: longContent},
+		{Role: llm.RoleAssistant, Content: longContent},
+		{Role: llm.RoleUser, Content: "q3"},
+		{Role: llm.RoleAssistant, Content: "a3"},
+		{Role: llm.RoleUser, Content: "recent"},
+		{Role: llm.RoleAssistant, Content: "answer"},
+	}
+
+	// KeepRecentTurns=2 should keep fewer messages than the default 4.
+	cfg := ContextConfig{ContextWindow: 200, TruncationRatio: 0.80, KeepRecentTurns: 2}
+	result := TruncateHistory(history, cfg)
+
+	require.Less(t, len(result), len(history))
+	// System prompt preserved.
+	assert.Equal(t, llm.RoleSystem, result[0].Role)
+	// Summary present.
+	assert.Contains(t, result[1].Content, "[Earlier conversation summary]")
+	// Recent 2 turns: q3+a3, recent+answer = 4 messages + sys + summary = 6
+	assert.Equal(t, "answer", result[len(result)-1].Content)
+}
+
+func TestComputeContextUsage(t *testing.T) {
+	history := []llm.Message{
+		{Role: llm.RoleSystem, Content: strings.Repeat("s", 400)}, // ~100 tokens + 4 overhead
+		{Role: llm.RoleUser, Content: strings.Repeat("u", 200)},   // ~50 tokens + 4 overhead
+		{Role: llm.RoleAssistant, Content: strings.Repeat("a", 100)}, // ~25 tokens + 4 overhead
+	}
+
+	cfg := ContextConfig{ContextWindow: 1000, TruncationRatio: 0.80}
+	usage := ComputeContextUsage(history, cfg)
+
+	assert.Equal(t, 1000, usage.ContextWindow)
+	assert.Greater(t, usage.EstimatedTokens, 0)
+	assert.Equal(t, 800, usage.Threshold)
+	assert.Equal(t, 1, usage.HistoryTurns) // 1 user message
+	assert.Greater(t, usage.SystemTokens, 0)
+
+	// Percent should be reasonable (total ~187 tokens / 1000 window = ~18%).
+	assert.True(t, usage.Percent > 10 && usage.Percent < 30,
+		"expected ~18%%, got %d%%", usage.Percent)
+}
+
+func TestTruncateLargeToolResult_BelowLimit(t *testing.T) {
+	output := "small result"
+	result := TruncateLargeToolResult(output, 100)
+	assert.Equal(t, output, result, "should not truncate below limit")
+}
+
+func TestTruncateLargeToolResult_AboveLimit(t *testing.T) {
+	// 10000 chars = ~2500 tokens. Limit to 500 tokens.
+	output := strings.Repeat("x", 10000)
+	result := TruncateLargeToolResult(output, 500)
+
+	assert.Less(t, len(result), len(output), "result should be shorter")
+	assert.Contains(t, result, "[output truncated to fit context window")
+	assert.Contains(t, result, "of 10000 chars shown")
+}
+
+func TestTruncateLargeToolResult_Empty(t *testing.T) {
+	assert.Equal(t, "", TruncateLargeToolResult("", 100))
+}
+
 func TestCountTailMessages(t *testing.T) {
 	history := []llm.Message{
 		{Role: llm.RoleSystem, Content: "sys"},

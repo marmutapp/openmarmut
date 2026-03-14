@@ -82,8 +82,9 @@ func FormatToolCall(name, args string) string {
 	) + ToolCallStyle.Render(")")
 }
 
-// FormatSummary returns a summary line like "[3 tool calls | 100 + 50 = 150 tokens | ~$0.01 | 2.3s]".
-func FormatSummary(toolCalls, promptTok, completionTok int, cost string, duration time.Duration) string {
+// FormatSummary returns a summary line like "[3 tool calls | 100 + 50 = 150 tokens | ~$0.01 | 2.3s | ctx: 14%]".
+// contextPct is optional (-1 to omit).
+func FormatSummary(toolCalls, promptTok, completionTok int, cost string, duration time.Duration, contextPct ...int) string {
 	var parts []string
 	if toolCalls > 0 {
 		parts = append(parts, fmt.Sprintf("%d tool calls", toolCalls))
@@ -94,6 +95,10 @@ func FormatSummary(toolCalls, promptTok, completionTok int, cost string, duratio
 		parts = append(parts, "~"+cost)
 	}
 	parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
+
+	if len(contextPct) > 0 && contextPct[0] >= 0 {
+		parts = append(parts, FormatContextPercent(contextPct[0]))
+	}
 
 	line := "[" + strings.Join(parts, " │ ") + "]"
 	return styled(DimStyle, line)
@@ -323,6 +328,55 @@ func TruncateEnd(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
+}
+
+// FormatContextPercent returns "ctx: N%" with color coding.
+// Green: 0-59%, Yellow: 60-79%, Red: 80%+.
+func FormatContextPercent(pct int) string {
+	text := fmt.Sprintf("ctx: %d%%", pct)
+	if !ColorEnabled() {
+		return text
+	}
+	switch {
+	case pct >= 80:
+		return ErrorStyle.Render(text)
+	case pct >= 60:
+		return WarningStyle.Render(text)
+	default:
+		return SuccessStyle.Render(text)
+	}
+}
+
+// RenderProgressBar returns a text progress bar like "██████░░░░░░░░░░░░░░ 45%".
+// Width is the number of bar characters. Color coded: green <60%, yellow 60-79%, red 80%+.
+func RenderProgressBar(pct, width int) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+
+	filled := (pct * width) / 100
+	empty := width - filled
+
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	label := fmt.Sprintf(" %d%%", pct)
+
+	if !ColorEnabled() {
+		return bar + label
+	}
+
+	var styledBar string
+	switch {
+	case pct >= 80:
+		styledBar = ErrorStyle.Render(bar)
+	case pct >= 60:
+		styledBar = WarningStyle.Render(bar)
+	default:
+		styledBar = SuccessStyle.Render(bar)
+	}
+	return styledBar + DimStyle.Render(label)
 }
 
 // HumanizeBytes formats a byte count into a human-readable string.

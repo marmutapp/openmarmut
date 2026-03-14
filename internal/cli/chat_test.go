@@ -162,7 +162,7 @@ func TestSlashCommands_NeverCallProvider(t *testing.T) {
 	// the test panics instead of failing gracefully.
 	state, _ := newTestState()
 
-	commands := []string{"/help", "/tools", "/cost", "/clear", "/quit", "/exit", "/unknown"}
+	commands := []string{"/help", "/tools", "/cost", "/context", "/clear", "/quit", "/exit", "/unknown"}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
 			require.NotPanics(t, func() {
@@ -375,6 +375,52 @@ func TestInteractiveConfirm_StopsSpinner(t *testing.T) {
 	// After confirm, the original spinner should have been stopped and replaced.
 	// state.spinner should be a NEW spinner (not the original).
 	assert.NotEqual(t, spinner, state.spinner, "spinner should be replaced after confirm")
+}
+
+func TestSlashContext_NoLLMCall(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/context", state)
+
+	assert.Equal(t, slashHandled, action)
+	output := buf.String()
+	assert.Contains(t, output, "Context Window")
+	assert.Contains(t, output, "Model window")
+	assert.Contains(t, output, "Current usage")
+	assert.Contains(t, output, "Threshold")
+}
+
+func TestSlashContext_ShowsProgressBar(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/context", state)
+
+	output := buf.String()
+	// Progress bar uses block characters.
+	assert.Contains(t, output, "░")
+	assert.Contains(t, output, "%")
+}
+
+func TestSlashHelp_IncludesContext(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/help", state)
+	assert.Contains(t, buf.String(), "/context")
+}
+
+func TestHumanizeInt(t *testing.T) {
+	tests := []struct {
+		input    int
+		expected string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1,000"},
+		{128000, "128,000"},
+		{1000000, "1,000,000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, humanizeInt(tt.input))
+		})
+	}
 }
 
 func TestInteractiveConfirm_EOF_Denies(t *testing.T) {

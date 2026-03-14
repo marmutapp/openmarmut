@@ -106,12 +106,20 @@ func newAskCmd(runner *Runner) *cobra.Command {
 				opts = append(opts, agent.WithMaxTokens(maxTok))
 			}
 
+			ctxCfg := agent.DefaultContextConfig()
 			if entry.ContextWindow > 0 {
-				opts = append(opts, agent.WithContextConfig(agent.ContextConfig{
-					ContextWindow:   entry.ContextWindow,
-					TruncationRatio: 0.80,
-				}))
+				ctxCfg.ContextWindow = entry.ContextWindow
 			}
+			if cfg.Agent.ContextWindow > 0 {
+				ctxCfg.ContextWindow = cfg.Agent.ContextWindow
+			}
+			if cfg.Agent.TruncationThreshold > 0 {
+				ctxCfg.TruncationRatio = cfg.Agent.TruncationThreshold
+			}
+			if cfg.Agent.KeepRecentTurns > 0 {
+				ctxCfg.KeepRecentTurns = cfg.Agent.KeepRecentTurns
+			}
+			opts = append(opts, agent.WithContextConfig(ctxCfg))
 
 			// In non-interactive ask mode, auto-approve all tools.
 			pc := agent.NewPermissionChecker(
