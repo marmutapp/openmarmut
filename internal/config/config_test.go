@@ -666,3 +666,101 @@ func TestValidate_LLM_AllProviderTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_LLM_AzureOpenAIConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	configContent := `
+mode: local
+target_dir: ` + dir + `
+llm:
+  active_provider: azure-gpt
+  providers:
+    - name: azure-gpt
+      type: openai
+      endpoint_url: "https://example.com/v1/chat/completions"
+      model: gpt-4o
+      api_key: "$AZURE_OPENAI_API_KEY"
+      headers:
+        api-key: "$AZURE_OPENAI_API_KEY"
+`
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
+
+	clearLLMEnv(t)
+
+	cfg, err := Load(&FlagOverrides{ConfigPath: &configPath})
+	require.NoError(t, err)
+
+	require.Len(t, cfg.LLM.Providers, 1)
+	p := cfg.LLM.Providers[0]
+	assert.Equal(t, "azure-gpt", p.Name)
+	assert.Equal(t, "openai", p.Type)
+	assert.Equal(t, "https://example.com/v1/chat/completions", p.EndpointURL)
+	assert.Equal(t, "gpt-4o", p.ModelName)
+	assert.Equal(t, "$AZURE_OPENAI_API_KEY", p.APIKey)
+	assert.Equal(t, "$AZURE_OPENAI_API_KEY", p.Headers["api-key"])
+	assert.Equal(t, "azure-gpt", cfg.LLM.ActiveProvider)
+}
+
+func TestLoad_ConfigFileDiscoveredInTargetDir(t *testing.T) {
+	dir := t.TempDir()
+	configContent := `
+mode: local
+target_dir: ` + dir + `
+llm:
+  active_provider: local-llm
+  providers:
+    - name: local-llm
+      type: ollama
+      model: llama3.1
+`
+	// Write .opencode.yaml inside the target dir, not cwd.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".opencode.yaml"), []byte(configContent), 0o644))
+
+	clearLLMEnv(t)
+
+	// Pass target dir via flag, no explicit config path.
+	cfg, err := Load(&FlagOverrides{TargetDir: &dir})
+	require.NoError(t, err)
+
+	require.Len(t, cfg.LLM.Providers, 1)
+	assert.Equal(t, "local-llm", cfg.LLM.Providers[0].Name)
+	assert.Equal(t, "ollama", cfg.LLM.Providers[0].Type)
+	assert.Equal(t, "llama3.1", cfg.LLM.Providers[0].ModelName)
+}
+
+func TestLoad_ConfigFileDiscoveredInTargetDirViaEnv(t *testing.T) {
+	dir := t.TempDir()
+	configContent := `
+mode: local
+target_dir: ` + dir + `
+llm:
+  active_provider: env-llm
+  providers:
+    - name: env-llm
+      type: anthropic
+      model: claude-sonnet
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".opencode.yaml"), []byte(configContent), 0o644))
+
+	clearLLMEnv(t)
+	t.Setenv("OPENCODE_TARGET_DIR", dir)
+
+	cfg, err := Load(nil)
+	require.NoError(t, err)
+
+	require.Len(t, cfg.LLM.Providers, 1)
+	assert.Equal(t, "env-llm", cfg.LLM.Providers[0].Name)
+}
+
+// clearLLMEnv clears all env vars that could interfere with config tests.
+func clearLLMEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
+		"OPENCODE_LOG_FORMAT", "OPENCODE_DEFAULT_TIMEOUT",
+		"OPENCODE_LLM_PROVIDER", "OPENCODE_LLM_MODEL", "OPENCODE_LLM_API_KEY",
+	} {
+		t.Setenv(key, "")
+	}
+}

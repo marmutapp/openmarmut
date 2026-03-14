@@ -136,8 +136,28 @@ func loadFile(cfg *Config, flags *FlagOverrides) error {
 			return fmt.Errorf("config file not found: %s", path)
 		}
 	} else {
-		// Try .opencode.yaml in cwd, then ~/.config/opencode/config.yaml.
-		candidates := []string{".opencode.yaml"}
+		// Determine the target directory early for config file discovery.
+		// Check flags first, then env, then fall back to cwd.
+		targetDir := ""
+		if flags != nil && flags.TargetDir != nil {
+			targetDir = *flags.TargetDir
+		}
+		if targetDir == "" {
+			targetDir = os.Getenv("OPENCODE_TARGET_DIR")
+		}
+		if targetDir == "" {
+			targetDir, _ = os.Getwd()
+		}
+
+		// Try .opencode.yaml in target dir, then cwd, then user config dir.
+		var candidates []string
+		if targetDir != "" {
+			candidates = append(candidates, filepath.Join(targetDir, ".opencode.yaml"))
+		}
+		cwd, _ := os.Getwd()
+		if cwd != "" && cwd != targetDir {
+			candidates = append(candidates, filepath.Join(cwd, ".opencode.yaml"))
+		}
 		if home, err := os.UserHomeDir(); err == nil {
 			candidates = append(candidates, filepath.Join(home, ".config", "opencode", "config.yaml"))
 		}
