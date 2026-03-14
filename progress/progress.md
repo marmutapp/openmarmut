@@ -2,7 +2,7 @@
 
 **Project:** OpenCode-Go  
 **Started:** 2026-03-13  
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14
 
 ---
 
@@ -91,19 +91,20 @@
 - [x] `internal/llm/openai/openai_test.go` — 21 httptest-based unit tests
 - [x] `internal/llm/anthropic/anthropic.go` — Anthropic wire format (updated to ProviderEntry + ApplyAuth)
 - [x] `internal/llm/anthropic/anthropic_test.go` — 16 httptest-based unit tests (updated for ProviderEntry)
-- [x] `internal/agent/agent.go` — Agent loop (observe→plan→act→verify), 20 tests
+- [x] `internal/agent/agent.go` — Agent loop (observe→plan→act→verify), 21 tests
 - [x] `internal/agent/tools.go` — 6 tools mapped to Runtime methods (read_file, write_file, delete_file, list_dir, mkdir, execute_command)
-- [x] `internal/agent/agent_test.go` — Agent loop tests with mock provider and runtime
+- [x] `internal/agent/agent_test.go` — Agent loop tests with mock provider and runtime (streaming after tool calls verified)
 - [ ] `internal/agent/security.go` — ContainsAPIKey, credential redaction
 - [x] `internal/cli/ask.go` — `opencode ask` with agent loop + `--no-tools` flag for simple questions
 - [x] `internal/cli/chat.go` — `opencode chat` interactive REPL with multi-turn agent loop
 - [x] `internal/cli/providers.go` — `opencode providers` list command
 - [x] Root command flags: `--provider`, `--model`, `--temperature`
 - [x] `initRuntime` helper in runner.go for ask/chat commands
+- [x] Tested end-to-end with Azure OpenAI (gpt-5.1-codex-mini via openai-responses type)
 
 ### Phase 7b: Remaining Wire Formats
-- [x] `internal/llm/responses/responses.go` — OpenAI Responses API wire format (o3, o4-mini, Codex)
-- [x] `internal/llm/responses/responses_test.go` — 18 httptest-based unit tests
+- [x] `internal/llm/responses/responses.go` — OpenAI Responses API wire format (o3, o4-mini, Codex, Azure)
+- [x] `internal/llm/responses/responses_test.go` — 22 httptest-based unit tests (incl. multi-turn agent flow, full URL support)
 - [x] `internal/llm/gemini/gemini.go` — Gemini wire format (streaming, functionCall/functionResponse)
 - [x] `internal/llm/gemini/gemini_test.go` — 15 httptest-based unit tests
 - [x] `internal/llm/ollama/ollama.go` — Ollama wire format (NDJSON streaming, tool calls)
@@ -147,6 +148,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 7a | LLM config wired into internal/config: LLMConfig struct (Providers, ActiveProvider, DefaultTemperature, DefaultMaxTokens, DefaultTimeout), FlagOverrides (--provider, --model, --temperature), env vars (OPENCODE_LLM_PROVIDER/MODEL/API_KEY), validation, ResolveActiveProvider with override chain. 29 new tests (42 total config tests). | Continue Phase 7a: agent loop, CLI commands
 2026-03-13 | Phase 7a | CLI commands: `opencode providers` (tabwriter, active marker), `opencode ask` (single-turn streaming via provider.Complete), root flags --provider/--model/--temperature wired to FlagOverrides. Smoke tested with multi-provider config. | Continue Phase 7a: agent loop, chat REPL
 2026-03-14 | Phase 7b | All 4 remaining wire formats implemented: openai-responses (18 tests), gemini (15 tests), ollama (15 tests), custom (19 tests). Updated ask.go imports to register all 6 provider types. 67 new tests across 4 packages. | Continue Phase 7a: agent loop, chat REPL
-2026-03-14 | Phase 7a | Agent loop implemented: tools.go (6 tools → Runtime), agent.go (loop with max iterations, usage aggregation, history), 20 tests. CLI wired: ask uses agent loop with --no-tools flag, chat REPL added. | Phase 7a nearly complete, remaining: security.go
+2026-03-14 | Phase 7a | Agent loop implemented: tools.go (6 tools → Runtime), agent.go (loop with max iterations, usage aggregation, history), 21 tests. CLI wired: ask uses agent loop with --no-tools flag, chat REPL added. | Phase 7a nearly complete, remaining: security.go
+2026-03-14 | Phase 7a+7b | Bug fixes: responses provider tool call serialization (call_id, empty assistant msg), endpoint URL path detection, streaming after tool calls. Tested end-to-end with Azure OpenAI gpt-5.1-codex-mini. Phase 7a+7b complete except security.go. | Start Phase 7c or security.go
 
 <!-- Claude: append a new line here after each working session -->
