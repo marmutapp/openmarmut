@@ -53,6 +53,13 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				opts = append(opts, agent.WithMaxTokens(maxTok))
 			}
 
+			if entry.ContextWindow > 0 {
+				opts = append(opts, agent.WithContextConfig(agent.ContextConfig{
+					ContextWindow:   entry.ContextWindow,
+					TruncationRatio: 0.80,
+				}))
+			}
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			fmt.Fprintf(os.Stderr, "Chat with %s (%s). Type /quit to exit.\n\n", provider.Name(), provider.Model())

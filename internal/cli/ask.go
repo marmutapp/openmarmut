@@ -94,6 +94,13 @@ func newAskCmd(runner *Runner) *cobra.Command {
 				opts = append(opts, agent.WithMaxTokens(maxTok))
 			}
 
+			if entry.ContextWindow > 0 {
+				opts = append(opts, agent.WithContextConfig(agent.ContextConfig{
+					ContextWindow:   entry.ContextWindow,
+					TruncationRatio: 0.80,
+				}))
+			}
+
 			ag := agent.New(provider, rt, log, opts...)
 			result, err := ag.Run(cmd.Context(), question, streamCB)
 			if err != nil {

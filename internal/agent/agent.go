@@ -70,6 +70,7 @@ type Agent struct {
 	temperature    *float64
 	maxTokens      *int
 	credentialKeys []string
+	contextCfg     ContextConfig
 }
 
 // Option configures the Agent.
@@ -100,6 +101,11 @@ func WithCredentialKeys(keys []string) Option {
 	return func(a *Agent) { a.credentialKeys = keys }
 }
 
+// WithContextConfig sets the context window management configuration.
+func WithContextConfig(cfg ContextConfig) Option {
+	return func(a *Agent) { a.contextCfg = cfg }
+}
+
 // New creates an Agent with the given provider and runtime.
 func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ...Option) *Agent {
 	tools := DefaultTools()
@@ -115,6 +121,7 @@ func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ..
 		toolMap:       toolMap,
 		logger:        logger,
 		maxIterations: defaultMaxIterations,
+		contextCfg:    DefaultContextConfig(),
 	}
 
 	for _, opt := range opts {
@@ -145,6 +152,9 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 	toolDefs := ToolDefs(a.tools)
 
 	for i := 0; i < a.maxIterations; i++ {
+		// Truncate history if approaching context window limit.
+		a.history = TruncateHistory(a.history, a.contextCfg)
+
 		req := llm.Request{
 			Messages:    a.history,
 			Tools:       toolDefs,

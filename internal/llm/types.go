@@ -91,8 +91,9 @@ type ProviderEntry struct {
 	Auth          AuthConfig        `yaml:"auth"`           // How to authenticate requests
 	PayloadConfig json.RawMessage   `yaml:"payload_config"` // Type-specific overrides (custom type: full template)
 	ResponsePath  string            `yaml:"response_path"`  // JSONPath-like for custom type response extraction
-	Temperature   *float64          `yaml:"temperature"`    // Default temperature (nil = provider default)
-	MaxTokens     *int              `yaml:"max_tokens"`     // Default max tokens (nil = provider default)
+	Temperature   *float64          `yaml:"temperature"`      // Default temperature (nil = provider default)
+	MaxTokens     *int              `yaml:"max_tokens"`       // Default max tokens (nil = provider default)
+	ContextWindow int              `yaml:"context_window"`   // Model context window in tokens (default: 128000)
 }
 
 // AuthConfig describes how to authenticate with an endpoint.
