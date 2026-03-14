@@ -653,7 +653,7 @@ func TestFindProvider(t *testing.T) {
 }
 
 func TestValidate_LLM_AllProviderTypes(t *testing.T) {
-	for _, typ := range []string{"openai", "anthropic", "gemini", "ollama", "custom"} {
+	for _, typ := range []string{"openai", "openai-responses", "anthropic", "gemini", "ollama", "custom"} {
 		t.Run(typ, func(t *testing.T) {
 			cfg := validBaseConfig()
 			cfg.LLM = LLMConfig{
