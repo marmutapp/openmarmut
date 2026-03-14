@@ -32,6 +32,8 @@ type chatState struct {
 	sessionUsage llm.Usage
 	model        string
 	out          io.Writer // Where to write command output (stderr in production).
+	scanner      *bufio.Scanner // stdin scanner, shared between main loop and confirm prompt.
+	spinner      *ui.Spinner    // current spinner, set before each ag.Run call; nil when idle.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -125,13 +127,27 @@ func renderCostBox(state *chatState) {
 
 // interactiveConfirm creates a ConfirmFunc that prompts the user on stderr/stdin
 // using a styled confirmation box.
-func interactiveConfirm(scanner *bufio.Scanner) agent.ConfirmFunc {
+// It stops the active spinner before prompting and restarts it after input.
+func interactiveConfirm(state *chatState) agent.ConfirmFunc {
 	return func(tc llm.ToolCall, preview string) agent.ConfirmResult {
+		// Stop the spinner so it doesn't overwrite the prompt.
+		if state.spinner != nil {
+			state.spinner.Stop()
+			state.spinner = nil
+		}
+
 		fmt.Fprint(os.Stderr, ui.RenderConfirmBox(preview))
-		if !scanner.Scan() {
+		fmt.Fprint(os.Stderr, "\n[y]es / [n]o / [a]lways: ")
+
+		if !state.scanner.Scan() {
 			return agent.ConfirmNo
 		}
-		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		answer := strings.TrimSpace(strings.ToLower(state.scanner.Text()))
+
+		// Restart spinner — agent continues working after user responds.
+		state.spinner = ui.NewSpinner(os.Stderr, "Working...")
+		state.spinner.Start()
+
 		switch answer {
 		case "y", "yes":
 			return agent.ConfirmYes
@@ -175,11 +191,18 @@ func newChatCmd(runner *Runner) *cobra.Command {
 
 			scanner := bufio.NewScanner(os.Stdin)
 
+			// Build state early so interactiveConfirm can reference it.
+			state := &chatState{
+				scanner: scanner,
+				model:   provider.Model(),
+				out:     os.Stderr,
+			}
+
 			// Build permission checker.
 			perms := agent.BuildPermissions(cfg.Agent.AutoAllow, cfg.Agent.Confirm)
 			var confirmFn agent.ConfirmFunc
 			if !runner.flags.AutoApprove {
-				confirmFn = interactiveConfirm(scanner)
+				confirmFn = interactiveConfirm(state)
 			}
 			pc := agent.NewPermissionChecker(perms, confirmFn)
 
@@ -210,12 +233,8 @@ func newChatCmd(runner *Runner) *cobra.Command {
 
 			ag := agent.New(provider, rt, log, opts...)
 
-			state := &chatState{
-				ag:          ag,
-				permChecker: pc,
-				model:       provider.Model(),
-				out:         os.Stderr,
-			}
+			state.ag = ag
+			state.permChecker = pc
 
 			// Welcome banner.
 			fmt.Fprintln(os.Stderr, ui.RenderWelcomeBanner(
@@ -230,11 +249,11 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				} else {
 					fmt.Fprint(os.Stderr, "you> ")
 				}
-				if !scanner.Scan() {
+				if !state.scanner.Scan() {
 					break
 				}
 
-				line := strings.TrimSpace(scanner.Text())
+				line := strings.TrimSpace(state.scanner.Text())
 				if line == "" {
 					continue
 				}
@@ -249,15 +268,18 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				}
 
 				// Show spinner while waiting for first token.
-				spinner := ui.NewSpinner(os.Stderr, "Thinking...")
-				spinner.Start()
+				state.spinner = ui.NewSpinner(os.Stderr, "Thinking...")
+				state.spinner.Start()
 				firstToken := true
 
 				// Stream tokens as they arrive, rendering markdown at the end.
 				var responseBuf strings.Builder
 				streamCB := func(text string) error {
 					if firstToken {
-						spinner.Stop()
+						if state.spinner != nil {
+							state.spinner.Stop()
+							state.spinner = nil
+						}
 						firstToken = false
 					}
 					responseBuf.WriteString(text)
@@ -266,7 +288,11 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				}
 
 				result, err := ag.Run(cmd.Context(), line, streamCB)
-				spinner.Stop() // Ensure spinner is stopped on error too.
+				// Ensure spinner is stopped on error or if no tokens were streamed.
+				if state.spinner != nil {
+					state.spinner.Stop()
+					state.spinner = nil
+				}
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "\n%s\n", ui.FormatError(err.Error()))
 					continue
@@ -292,7 +318,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				fmt.Fprintln(os.Stderr)
 			}
 
-			if err := scanner.Err(); err != nil {
+			if err := state.scanner.Err(); err != nil {
 				return fmt.Errorf("chat: %w", err)
 			}
 

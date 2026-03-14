@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gajaai/openmarmut-go/internal/agent"
@@ -263,4 +265,96 @@ func TestConfirmBox(t *testing.T) {
 	assert.Contains(t, result, "Permission Required")
 	assert.Contains(t, result, "write_file")
 	assert.Contains(t, result, "[y]es")
+}
+
+func TestInteractiveConfirm_WaitsForInput(t *testing.T) {
+	// Simulate stdin with pre-loaded input via a pipe.
+	tests := []struct {
+		name     string
+		input    string
+		expected agent.ConfirmResult
+	}{
+		{"yes", "y\n", agent.ConfirmYes},
+		{"YES uppercase", "YES\n", agent.ConfirmYes},
+		{"no", "n\n", agent.ConfirmNo},
+		{"always", "always\n", agent.ConfirmAlways},
+		{"a shorthand", "a\n", agent.ConfirmAlways},
+		{"empty input denies", "\n", agent.ConfirmNo},
+		{"garbage denies", "maybe\n", agent.ConfirmNo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := strings.NewReader(tt.input)
+			scanner := bufio.NewScanner(r)
+
+			state := &chatState{
+				scanner: scanner,
+				out:     io.Discard,
+			}
+
+			confirmFn := interactiveConfirm(state)
+
+			tc := llm.ToolCall{
+				ID:        "call_1",
+				Name:      "write_file",
+				Arguments: `{"path":"test.go","content":"package main"}`,
+			}
+
+			result := confirmFn(tc, "→ write_file(test.go)")
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestInteractiveConfirm_StopsSpinner(t *testing.T) {
+	r := strings.NewReader("y\n")
+	scanner := bufio.NewScanner(r)
+
+	// Create a spinner writing to a buffer (won't actually animate since not a TTY).
+	var spinBuf bytes.Buffer
+	spinner := ui.NewSpinner(&spinBuf, "Thinking...")
+
+	state := &chatState{
+		scanner: scanner,
+		spinner: spinner,
+		out:     io.Discard,
+	}
+
+	confirmFn := interactiveConfirm(state)
+
+	tc := llm.ToolCall{
+		ID:        "call_1",
+		Name:      "execute_command",
+		Arguments: `{"command":"rm -rf /"}`,
+	}
+
+	result := confirmFn(tc, "→ execute_command\n  $ rm -rf /")
+	assert.Equal(t, agent.ConfirmYes, result)
+
+	// After confirm, the original spinner should have been stopped and replaced.
+	// state.spinner should be a NEW spinner (not the original).
+	assert.NotEqual(t, spinner, state.spinner, "spinner should be replaced after confirm")
+}
+
+func TestInteractiveConfirm_EOF_Denies(t *testing.T) {
+	// Empty reader simulates stdin EOF (e.g. Ctrl+D).
+	r := strings.NewReader("")
+	scanner := bufio.NewScanner(r)
+
+	state := &chatState{
+		scanner: scanner,
+		out:     io.Discard,
+	}
+
+	confirmFn := interactiveConfirm(state)
+
+	tc := llm.ToolCall{
+		ID:        "call_1",
+		Name:      "write_file",
+		Arguments: `{"path":"x.go","content":""}`,
+	}
+
+	result := confirmFn(tc, "→ write_file(x.go)")
+	assert.Equal(t, agent.ConfirmNo, result, "EOF should deny")
 }
