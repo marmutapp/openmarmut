@@ -488,6 +488,52 @@ func TestComplete_CustomHeaders(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// --- URL: Bare Host (appends /v1/responses) ---
+
+func TestComplete_BareHostAppendsPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/responses", r.URL.Path)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseEvents(
+			`{"type":"response.output_text.delta","delta":"ok"}`,
+			`{"type":"response.completed","response":{"id":"r","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		))
+	}))
+	defer srv.Close()
+
+	p := testProvider(t, srv.URL) // bare host, no path
+	_, err := p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
+	}, nil)
+	require.NoError(t, err)
+}
+
+// --- URL: Full URL With Path (used as-is) ---
+
+func TestComplete_FullURLUsedAsIs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/openai/responses", r.URL.Path)
+		assert.Equal(t, "2025-04-01-preview", r.URL.Query().Get("api-version"))
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseEvents(
+			`{"type":"response.output_text.delta","delta":"ok"}`,
+			`{"type":"response.completed","response":{"id":"r","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		))
+	}))
+	defer srv.Close()
+
+	entry := testEntry(srv.URL + "/openai/responses?api-version=2025-04-01-preview")
+	p, err := New(entry, testLogger)
+	require.NoError(t, err)
+
+	_, err = p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
+	}, nil)
+	require.NoError(t, err)
+}
+
 // --- Registration ---
 
 func TestRegistration(t *testing.T) {

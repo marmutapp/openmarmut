@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gajaai/opencode-go/internal/llm"
@@ -69,7 +70,12 @@ func (p *Provider) Complete(ctx context.Context, req llm.Request, cb llm.StreamC
 		return nil, fmt.Errorf("responses.Complete: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+responsesPath, bytes.NewReader(body))
+	reqURL := p.baseURL + responsesPath
+	if hasPath(p.baseURL) {
+		reqURL = p.baseURL
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("responses.Complete: %w", err)
 	}
@@ -92,6 +98,17 @@ func (p *Provider) Complete(ctx context.Context, req llm.Request, cb llm.StreamC
 	}
 
 	return p.parseSSEStream(resp.Body, cb)
+}
+
+// hasPath reports whether the endpoint URL contains a non-empty path component.
+// Bare hosts like "https://api.openai.com" return false; URLs with paths like
+// "https://example.com/openai/responses?api-version=..." return true.
+func hasPath(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	return u.Path != "" && u.Path != "/"
 }
 
 // --- Request Building ---
