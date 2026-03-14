@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gajaai/opencode-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/llm"
 )
 
 // PermissionLevel defines what happens when a tool is called.

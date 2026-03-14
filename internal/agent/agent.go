@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/gajaai/opencode-go/internal/llm"
-	"github.com/gajaai/opencode-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/runtime"
 )
 
 const defaultMaxIterations = 10

@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gajaai/opencode-go/internal/agent"
-	"github.com/gajaai/opencode-go/internal/config"
-	"github.com/gajaai/opencode-go/internal/llm"
-	"github.com/gajaai/opencode-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/agent"
+	"github.com/gajaai/openmarmut-go/internal/config"
+	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/logger"
 	"github.com/spf13/cobra"
 )
 

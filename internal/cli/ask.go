@@ -5,19 +5,19 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gajaai/opencode-go/internal/agent"
-	"github.com/gajaai/opencode-go/internal/config"
-	"github.com/gajaai/opencode-go/internal/llm"
-	"github.com/gajaai/opencode-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/agent"
+	"github.com/gajaai/openmarmut-go/internal/config"
+	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/logger"
 	"github.com/spf13/cobra"
 
 	// Register LLM wire format providers.
-	_ "github.com/gajaai/opencode-go/internal/llm/anthropic"
-	_ "github.com/gajaai/opencode-go/internal/llm/custom"
-	_ "github.com/gajaai/opencode-go/internal/llm/gemini"
-	_ "github.com/gajaai/opencode-go/internal/llm/ollama"
-	_ "github.com/gajaai/opencode-go/internal/llm/openai"
-	_ "github.com/gajaai/opencode-go/internal/llm/responses"
+	_ "github.com/gajaai/openmarmut-go/internal/llm/anthropic"
+	_ "github.com/gajaai/openmarmut-go/internal/llm/custom"
+	_ "github.com/gajaai/openmarmut-go/internal/llm/gemini"
+	_ "github.com/gajaai/openmarmut-go/internal/llm/ollama"
+	_ "github.com/gajaai/openmarmut-go/internal/llm/openai"
+	_ "github.com/gajaai/openmarmut-go/internal/llm/responses"
 )
 
 func newAskCmd(runner *Runner) *cobra.Command {

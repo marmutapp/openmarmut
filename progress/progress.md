@@ -1,6 +1,6 @@
 # Project Progress Tracker
 
-**Project:** OpenCode-Go  
+**Project:** OpenMarmut-Go  
 **Started:** 2026-03-13  
 **Last Updated:** 2026-03-14
 
@@ -20,7 +20,7 @@
 - [x] CLAUDE.md + rules setup
 
 ## Phase 2: Foundation Modules
-- [x] `go.mod` init (`github.com/gajaai/opencode-go`)
+- [x] `go.mod` init (`github.com/gajaai/openmarmut-go`)
 - [x] `internal/runtime/runtime.go` — Runtime interface + shared types + sentinel errors
 - [x] `internal/pathutil/pathutil.go` — Resolve + MustBeRelative
 - [x] `internal/pathutil/pathutil_test.go` — all edge cases
@@ -50,8 +50,8 @@
 - [x] `internal/cli/mkdir.go`
 - [x] `internal/cli/exec.go`
 - [x] `internal/cli/info.go`
-- [x] `cmd/opencode/main.go` — entrypoint
-- [x] Smoke test: `go run ./cmd/opencode read README.md`
+- [x] `cmd/openmarmut/main.go` — entrypoint
+- [x] Smoke test: `go run ./cmd/openmarmut read README.md`
 
 ## Phase 5: Docker Runtime
 - [x] `internal/dockerrt/dockerrt.go` — struct, New, Init (container create/start)
@@ -95,9 +95,9 @@
 - [x] `internal/agent/tools.go` — 6 tools mapped to Runtime methods (read_file, write_file, delete_file, list_dir, mkdir, execute_command)
 - [x] `internal/agent/agent_test.go` — Agent loop tests with mock provider and runtime (streaming after tool calls verified)
 - [x] `internal/agent/security.go` — RedactCredentials, DetectCredentialLeak, CollectCredentials, wired into agent loop
-- [x] `internal/cli/ask.go` — `opencode ask` with agent loop + `--no-tools` flag for simple questions
-- [x] `internal/cli/chat.go` — `opencode chat` interactive REPL with multi-turn agent loop
-- [x] `internal/cli/providers.go` — `opencode providers` list command
+- [x] `internal/cli/ask.go` — `openmarmut ask` with agent loop + `--no-tools` flag for simple questions
+- [x] `internal/cli/chat.go` — `openmarmut chat` interactive REPL with multi-turn agent loop
+- [x] `internal/cli/providers.go` — `openmarmut providers` list command
 - [x] Root command flags: `--provider`, `--model`, `--temperature`
 - [x] `initRuntime` helper in runner.go for ask/chat commands
 - [x] Tested end-to-end with Azure OpenAI (gpt-5.1-codex-mini via openai-responses type)
@@ -159,6 +159,10 @@
 - [x] ask.go — non-interactive mode auto-approves all tools
 - [x] 23 permission tests (unit + 3 integration tests in agent loop)
 
+## Phase 10: Project Rename
+
+- [x] Rename project from OpenCode to OpenMarmut — go.mod, all imports, CLI command, env vars, config files, docs, specs, tests
+
 ---
 
 ## Completion Criteria
@@ -184,10 +188,10 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 6 | Factory with init-registration pattern, CLI wired to both runtimes, Makefile, Dockerfile, README. All tests pass. | Start Phase 7: LLM integration
 2026-03-13 | Phase 7 | LLM integration spec complete (specs/llm-spec.md): Provider interface, 4 providers (OpenAI/Anthropic/Gemini/Ollama), agent loop, tool definitions, config, CLI commands, credential security. | Start Phase 7a implementation
 2026-03-13 | Phase 7a | Provider interface + types + factory + ResolveAPIKey (internal/llm/llm.go). Anthropic provider fully implemented: SSE streaming, tool_use blocks, input_json_delta accumulation, system prompt extraction, tool result merging. 22 unit tests. | Continue Phase 7a: remaining providers + agent
-2026-03-13 | Phase 7 | Rewrote specs/llm-spec.md v2: provider type system (wire format abstraction), ProviderEntry/AuthConfig structs, multi-provider config with active_provider, credential env var references, custom endpoint support, `opencode providers` command. Updated progress.md Phase 7 checkboxes. | Continue Phase 7a: update llm.go to ProviderEntry, implement OpenAI wire format
+2026-03-13 | Phase 7 | Rewrote specs/llm-spec.md v2: provider type system (wire format abstraction), ProviderEntry/AuthConfig structs, multi-provider config with active_provider, credential env var references, custom endpoint support, `openmarmut providers` command. Updated progress.md Phase 7 checkboxes. | Continue Phase 7a: update llm.go to ProviderEntry, implement OpenAI wire format
 2026-03-13 | Phase 7a | Rewrote LLM package: types.go + factory.go + credentials.go replacing llm.go. ProviderEntry/AuthConfig, RegisterType/NewProvider factory with defaults+credential resolution, ApplyAuth helper. Updated Anthropic to ProviderEntry. Implemented OpenAI wire format: SSE streaming, tool call accumulation, custom headers. 57 total tests (20 llm + 16 anthropic + 21 openai). | Continue Phase 7a: config additions, agent loop, CLI commands
-2026-03-13 | Phase 7a | LLM config wired into internal/config: LLMConfig struct (Providers, ActiveProvider, DefaultTemperature, DefaultMaxTokens, DefaultTimeout), FlagOverrides (--provider, --model, --temperature), env vars (OPENCODE_LLM_PROVIDER/MODEL/API_KEY), validation, ResolveActiveProvider with override chain. 29 new tests (42 total config tests). | Continue Phase 7a: agent loop, CLI commands
-2026-03-13 | Phase 7a | CLI commands: `opencode providers` (tabwriter, active marker), `opencode ask` (single-turn streaming via provider.Complete), root flags --provider/--model/--temperature wired to FlagOverrides. Smoke tested with multi-provider config. | Continue Phase 7a: agent loop, chat REPL
+2026-03-13 | Phase 7a | LLM config wired into internal/config: LLMConfig struct (Providers, ActiveProvider, DefaultTemperature, DefaultMaxTokens, DefaultTimeout), FlagOverrides (--provider, --model, --temperature), env vars (OPENMARMUT_LLM_PROVIDER/MODEL/API_KEY), validation, ResolveActiveProvider with override chain. 29 new tests (42 total config tests). | Continue Phase 7a: agent loop, CLI commands
+2026-03-13 | Phase 7a | CLI commands: `openmarmut providers` (tabwriter, active marker), `openmarmut ask` (single-turn streaming via provider.Complete), root flags --provider/--model/--temperature wired to FlagOverrides. Smoke tested with multi-provider config. | Continue Phase 7a: agent loop, chat REPL
 2026-03-14 | Phase 7b | All 4 remaining wire formats implemented: openai-responses (18 tests), gemini (15 tests), ollama (15 tests), custom (19 tests). Updated ask.go imports to register all 6 provider types. 67 new tests across 4 packages. | Continue Phase 7a: agent loop, chat REPL
 2026-03-14 | Phase 7a | Agent loop implemented: tools.go (6 tools → Runtime), agent.go (loop with max iterations, usage aggregation, history), 21 tests. CLI wired: ask uses agent loop with --no-tools flag, chat REPL added. | Phase 7a nearly complete, remaining: security.go
 2026-03-14 | Phase 7a+7b | Bug fixes: responses provider tool call serialization (call_id, empty assistant msg), endpoint URL path detection, streaming after tool calls. Tested end-to-end with Azure OpenAI gpt-5.1-codex-mini. Phase 7a+7b complete except security.go. | Start Phase 7c or security.go
@@ -196,5 +200,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 
 2026-03-14 | Phase 8 | Advanced agent capabilities: 4 new tools (grep_files, find_files, patch_file, read_file_lines), context window management with auto-truncation, chat REPL improvements (streaming, inline tool calls, slash commands). 38 new tests across 3 commits. | Start Phase 9: permissions
 2026-03-14 | Phase 9 | Permission & confirmation system: PermissionChecker with auto/confirm/deny levels, interactive y/n/always UI in chat, FormatToolPreview, BuildPermissions from config, --auto-approve flag, AgentConfig in config. 23 new tests. | All phases done
+
+2026-03-15 | Phase 10 | Renamed project from OpenCode to OpenMarmut: go.mod module path, all imports, cmd/opencode→cmd/openmarmut, CLI root command, env var prefix OPENCODE_→OPENMARMUT_, config file .opencode.yaml→.openmarmut.yaml, all docs/specs/progress/rules. All 16 packages pass. | All phases done
 
 <!-- Claude: append a new line here after each working session -->

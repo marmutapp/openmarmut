@@ -1,4 +1,4 @@
-# OpenCode-Go: LLM Integration Specification
+# OpenMarmut-Go: LLM Integration Specification
 
 **Version:** 2.0
 **Last Updated:** 2026-03-13
@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-Phase 7 adds AI model support to OpenCode-Go. An LLM reads the project via the
+Phase 7 adds AI model support to OpenMarmut-Go. An LLM reads the project via the
 existing `Runtime` interface, decides what operations to perform, and executes
 them through the same Runtime. The tool becomes an agentic coding assistant that
 works identically whether the underlying runtime is local or Docker.
@@ -494,7 +494,7 @@ circular dependency if `llm` ever needs to import `config`.
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENCODE_LLM_PROVIDER` | Override active_provider |
+| `OPENMARMUT_LLM_PROVIDER` | Override active_provider |
 | `OPENAI_API_KEY` | OpenAI API key (standard) |
 | `ANTHROPIC_API_KEY` | Anthropic API key (standard) |
 | `GOOGLE_API_KEY` | Google Gemini API key (standard) |
@@ -647,7 +647,7 @@ llm:
       model: llama3.1
 ```
 
-Usage: `opencode ask --provider gpt "explain this code"` overrides active_provider.
+Usage: `openmarmut ask --provider gpt "explain this code"` overrides active_provider.
 
 ### 6.5 Validation
 
@@ -673,7 +673,7 @@ etc.) so the tool continues to work without any LLM configuration.
 
 ```
 1. If --provider flag set → find entry by name → error if not found
-2. Else if OPENCODE_LLM_PROVIDER env var set → find entry by name
+2. Else if OPENMARMUT_LLM_PROVIDER env var set → find entry by name
 3. Else use llm.active_provider from config
 4. If still empty and providers list has exactly 1 entry → use it
 5. If still empty → error: "no active provider configured"
@@ -775,8 +775,8 @@ import (
     "context"
     "log/slog"
 
-    "github.com/gajaai/opencode-go/internal/llm"
-    "github.com/gajaai/opencode-go/internal/runtime"
+    "github.com/gajaai/openmarmut-go/internal/llm"
+    "github.com/gajaai/openmarmut-go/internal/runtime"
 )
 
 // Agent orchestrates the observe→plan→act→verify loop.
@@ -880,7 +880,7 @@ History grows unboundedly during a session. For long conversations:
 
 ## 9. CLI Commands
 
-### 9.1 `opencode ask "question"`
+### 9.1 `openmarmut ask "question"`
 
 Single-shot mode. Sends one message, runs the agent loop, prints the result, exits.
 
@@ -908,7 +908,7 @@ func newAskCmd(runner *Runner) *cobra.Command {
 }
 ```
 
-### 9.2 `opencode chat`
+### 9.2 `openmarmut chat`
 
 Interactive REPL mode. Reads user input, runs the agent loop for each input,
 prints streaming output. Conversation persists across turns.
@@ -921,12 +921,12 @@ prints streaming output. Conversation persists across turns.
 5. Print newline, go to 1
 ```
 
-### 9.3 `opencode providers`
+### 9.3 `openmarmut providers`
 
 Lists all configured providers and indicates which is active.
 
 ```
-$ opencode providers
+$ openmarmut providers
   NAME          TYPE        MODEL                     ENDPOINT
 * claude        anthropic   claude-sonnet-4-20250514  https://api.anthropic.com
   gpt           openai      gpt-4o                    https://api.openai.com

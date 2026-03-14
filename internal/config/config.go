@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gajaai/opencode-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,10 +35,10 @@ type LLMConfig struct {
 	DefaultTemperature *float64            `yaml:"default_temperature"`
 	DefaultMaxTokens   *int                `yaml:"default_max_tokens"`
 	DefaultTimeout     time.Duration       `yaml:"default_timeout"`
-	// ModelOverride is set from OPENCODE_LLM_MODEL env or --model flag.
+	// ModelOverride is set from OPENMARMUT_LLM_MODEL env or --model flag.
 	// Applied to the active provider at resolution time.
 	ModelOverride string `yaml:"-"`
-	// APIKeyOverride is set from OPENCODE_LLM_API_KEY env.
+	// APIKeyOverride is set from OPENMARMUT_LLM_API_KEY env.
 	// Applied to the active provider at resolution time.
 	APIKeyOverride string `yaml:"-"`
 }
@@ -151,23 +151,23 @@ func loadFile(cfg *Config, flags *FlagOverrides) error {
 			targetDir = *flags.TargetDir
 		}
 		if targetDir == "" {
-			targetDir = os.Getenv("OPENCODE_TARGET_DIR")
+			targetDir = os.Getenv("OPENMARMUT_TARGET_DIR")
 		}
 		if targetDir == "" {
 			targetDir, _ = os.Getwd()
 		}
 
-		// Try .opencode.yaml in target dir, then cwd, then user config dir.
+		// Try .openmarmut.yaml in target dir, then cwd, then user config dir.
 		var candidates []string
 		if targetDir != "" {
-			candidates = append(candidates, filepath.Join(targetDir, ".opencode.yaml"))
+			candidates = append(candidates, filepath.Join(targetDir, ".openmarmut.yaml"))
 		}
 		cwd, _ := os.Getwd()
 		if cwd != "" && cwd != targetDir {
-			candidates = append(candidates, filepath.Join(cwd, ".opencode.yaml"))
+			candidates = append(candidates, filepath.Join(cwd, ".openmarmut.yaml"))
 		}
 		if home, err := os.UserHomeDir(); err == nil {
-			candidates = append(candidates, filepath.Join(home, ".config", "opencode", "config.yaml"))
+			candidates = append(candidates, filepath.Join(home, ".config", "openmarmut", "config.yaml"))
 		}
 		for _, c := range candidates {
 			if _, err := os.Stat(c); err == nil {
@@ -193,43 +193,43 @@ func loadFile(cfg *Config, flags *FlagOverrides) error {
 	return nil
 }
 
-// applyEnv applies OPENCODE_ environment variables onto cfg.
+// applyEnv applies OPENMARMUT_ environment variables onto cfg.
 func applyEnv(cfg *Config) {
-	if v := os.Getenv("OPENCODE_MODE"); v != "" {
+	if v := os.Getenv("OPENMARMUT_MODE"); v != "" {
 		cfg.Mode = v
 	}
-	if v := os.Getenv("OPENCODE_TARGET_DIR"); v != "" {
+	if v := os.Getenv("OPENMARMUT_TARGET_DIR"); v != "" {
 		cfg.TargetDir = v
 	}
-	if v := os.Getenv("OPENCODE_LOG_LEVEL"); v != "" {
+	if v := os.Getenv("OPENMARMUT_LOG_LEVEL"); v != "" {
 		cfg.Log.Level = v
 	}
-	if v := os.Getenv("OPENCODE_LOG_FORMAT"); v != "" {
+	if v := os.Getenv("OPENMARMUT_LOG_FORMAT"); v != "" {
 		cfg.Log.Format = v
 	}
-	if v := os.Getenv("OPENCODE_DOCKER_IMAGE"); v != "" {
+	if v := os.Getenv("OPENMARMUT_DOCKER_IMAGE"); v != "" {
 		cfg.Docker.Image = v
 	}
-	if v := os.Getenv("OPENCODE_DOCKER_MOUNT_PATH"); v != "" {
+	if v := os.Getenv("OPENMARMUT_DOCKER_MOUNT_PATH"); v != "" {
 		cfg.Docker.MountPath = v
 	}
-	if v := os.Getenv("OPENCODE_DOCKER_NETWORK_MODE"); v != "" {
+	if v := os.Getenv("OPENMARMUT_DOCKER_NETWORK_MODE"); v != "" {
 		cfg.Docker.NetworkMode = v
 	}
-	if v := os.Getenv("OPENCODE_DEFAULT_TIMEOUT"); v != "" {
+	if v := os.Getenv("OPENMARMUT_DEFAULT_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.DefaultTimeout = d
 		}
 	}
 
 	// LLM env overrides.
-	if v := os.Getenv("OPENCODE_LLM_PROVIDER"); v != "" {
+	if v := os.Getenv("OPENMARMUT_LLM_PROVIDER"); v != "" {
 		cfg.LLM.ActiveProvider = v
 	}
-	if v := os.Getenv("OPENCODE_LLM_MODEL"); v != "" {
+	if v := os.Getenv("OPENMARMUT_LLM_MODEL"); v != "" {
 		cfg.LLM.ModelOverride = v
 	}
-	if v := os.Getenv("OPENCODE_LLM_API_KEY"); v != "" {
+	if v := os.Getenv("OPENMARMUT_LLM_API_KEY"); v != "" {
 		cfg.LLM.APIKeyOverride = v
 	}
 }

@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gajaai/opencode-go/internal/pathutil"
-	"github.com/gajaai/opencode-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/pathutil"
+	"github.com/gajaai/openmarmut-go/internal/runtime"
 )
 
 // LocalRuntime implements runtime.Runtime using the host filesystem and os/exec.
@@ -106,7 +106,7 @@ func (r *LocalRuntime) WriteFile(ctx context.Context, relPath string, data []byt
 	}
 
 	// Atomic write: temp file + rename.
-	tmpFile, err := os.CreateTemp(dir, ".opencode-tmp-*")
+	tmpFile, err := os.CreateTemp(dir, ".openmarmut-tmp-*")
 	if err != nil {
 		return fmt.Errorf("localrt.WriteFile(%s): create temp file: %w", relPath, err)
 	}

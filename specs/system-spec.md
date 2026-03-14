@@ -1,4 +1,4 @@
-# OpenCode-Go: System Specification
+# OpenMarmut-Go: System Specification
 
 **Version:** 1.0  
 **Last Updated:** 2026-03-13  
@@ -8,7 +8,7 @@
 
 ## 1. System Overview
 
-OpenCode-Go is a CLI tool written in Go that provides an AI-assisted development environment capable of operating on a target project directory. It supports two mutually exclusive runtime modes:
+OpenMarmut-Go is a CLI tool written in Go that provides an AI-assisted development environment capable of operating on a target project directory. It supports two mutually exclusive runtime modes:
 
 - **Local Mode** — operates directly on the host filesystem and executes commands via the host shell.
 - **Docker Mode** — mounts the target directory into a Docker container and executes all operations within that container, providing isolation from the host.
@@ -266,8 +266,8 @@ func Validate(cfg *Config) error                    // Returns all violations, n
 
 Config sources (priority order):
 1. CLI flags (highest)
-2. Environment variables (prefix `OPENCODE_`)
-3. Config file (`.opencode.yaml` in target dir or `~/.config/opencode/config.yaml`)
+2. Environment variables (prefix `OPENMARMUT_`)
+3. Config file (`.openmarmut.yaml` in target dir or `~/.config/openmarmut/config.yaml`)
 4. Hardcoded defaults (lowest)
 
 ### 5.4 `internal/logger`
@@ -283,7 +283,7 @@ No wrapper types. Pass `*slog.Logger` directly everywhere.
 Cobra-based CLI.
 
 ```
-opencode [global flags] <command> [command flags] [args]
+openmarmut [global flags] <command> [command flags] [args]
 
 Global flags:
   --mode, -m      "local" or "docker" (default: "local")

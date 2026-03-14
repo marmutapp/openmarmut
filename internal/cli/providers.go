@@ -5,9 +5,9 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/gajaai/opencode-go/internal/config"
-	"github.com/gajaai/opencode-go/internal/llm"
-	"github.com/gajaai/opencode-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/config"
+	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ func newProvidersCmd(runner *Runner) *cobra.Command {
 			}
 
 			if len(cfg.LLM.Providers) == 0 {
-				fmt.Fprintln(os.Stderr, "No LLM providers configured. Add a providers section to .opencode.yaml.")
+				fmt.Fprintln(os.Stderr, "No LLM providers configured. Add a providers section to .openmarmut.yaml.")
 				return nil
 			}
 

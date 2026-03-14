@@ -1,4 +1,4 @@
-# OpenCode-Go
+# OpenMarmut-Go
 
 CLI tool for AI-assisted development with local or Docker runtime modes. Operates on a target project directory through a unified `Runtime` interface.
 
@@ -11,7 +11,7 @@ make build
 Or directly:
 
 ```bash
-go build -o opencode ./cmd/opencode
+go build -o openmarmut ./cmd/openmarmut
 ```
 
 ## Usage
@@ -30,25 +30,25 @@ go build -o opencode ./cmd/opencode
 
 ```bash
 # Read a file
-opencode read path/to/file.txt
+openmarmut read path/to/file.txt
 
 # Write stdin to a file
-echo "content" | opencode write path/to/file.txt
+echo "content" | openmarmut write path/to/file.txt
 
 # Delete a file
-opencode delete path/to/file.txt
+openmarmut delete path/to/file.txt
 
 # List directory
-opencode ls src/
+openmarmut ls src/
 
 # Create directory
-opencode mkdir path/to/dir
+openmarmut mkdir path/to/dir
 
 # Execute a command
-opencode exec "go test ./..."
+openmarmut exec "go test ./..."
 
 # Show runtime info
-opencode info
+openmarmut info
 ```
 
 ### Local mode (default)
@@ -56,8 +56,8 @@ opencode info
 Operates directly on the host filesystem:
 
 ```bash
-opencode -t /path/to/project read main.go
-opencode -t /path/to/project exec "go build ./..."
+openmarmut -t /path/to/project read main.go
+openmarmut -t /path/to/project exec "go build ./..."
 ```
 
 ### Docker mode
@@ -66,19 +66,19 @@ Mounts the target directory into an isolated container:
 
 ```bash
 # Build the default image
-docker build -t opencode-sandbox .
+docker build -t openmarmut-sandbox .
 
 # Use Docker mode
-opencode -m docker --docker-image opencode-sandbox read main.go
-opencode -m docker --docker-image opencode-sandbox exec "ls -la"
+openmarmut -m docker --docker-image openmarmut-sandbox read main.go
+openmarmut -m docker --docker-image openmarmut-sandbox exec "ls -la"
 ```
 
-Or via config file (`.opencode.yaml`):
+Or via config file (`.openmarmut.yaml`):
 
 ```yaml
 mode: docker
 docker:
-  image: opencode-sandbox
+  image: openmarmut-sandbox
   mount_path: /workspace
   network_mode: none
 ```
@@ -88,8 +88,8 @@ docker:
 Config is merged from (highest to lowest priority):
 
 1. CLI flags
-2. Environment variables (`OPENCODE_MODE`, `OPENCODE_TARGET_DIR`, etc.)
-3. Config file (`.opencode.yaml` in target dir, or `~/.config/opencode/config.yaml`)
+2. Environment variables (`OPENMARMUT_MODE`, `OPENMARMUT_TARGET_DIR`, etc.)
+3. Config file (`.openmarmut.yaml` in target dir, or `~/.config/openmarmut/config.yaml`)
 4. Defaults
 
 ## Testing
@@ -108,7 +108,7 @@ make lint
 ## Architecture
 
 ```
-cmd/opencode/         Entrypoint
+cmd/openmarmut/         Entrypoint
 internal/
   cli/                Cobra commands + Runner lifecycle
   runtime/            Runtime interface, types, factory

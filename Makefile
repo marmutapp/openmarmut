@@ -1,11 +1,11 @@
-BINARY := opencode
-MODULE := github.com/gajaai/opencode-go
+BINARY := openmarmut
+MODULE := github.com/gajaai/openmarmut-go
 GOFLAGS ?=
 
 .PHONY: build test lint integration-test clean fmt vet
 
 build:
-	go build $(GOFLAGS) -o $(BINARY) ./cmd/opencode
+	go build $(GOFLAGS) -o $(BINARY) ./cmd/openmarmut
 
 test:
 	go test ./... -count=1

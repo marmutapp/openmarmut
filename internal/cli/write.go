@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/gajaai/opencode-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/runtime"
 	"github.com/spf13/cobra"
 )
 

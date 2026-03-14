@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/gajaai/opencode-go/internal/config"
+	"github.com/gajaai/openmarmut-go/internal/config"
 )
 
 // RuntimeConstructor is a function that creates a Runtime from config.

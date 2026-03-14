@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gajaai/opencode-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/runtime"
 )
 
 // Resolve safely resolves a relative path against a base directory.

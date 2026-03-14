@@ -1,4 +1,4 @@
-# OpenCode-Go Hands-On Walkthrough
+# OpenMarmut-Go Hands-On Walkthrough
 
 This walkthrough assumes Ubuntu with Go 1.22+ installed.
 Every command is copy-pasteable and designed to run in sequence.
@@ -8,14 +8,14 @@ Every command is copy-pasteable and designed to run in sequence.
 ## 1. Build the Binary
 
 ```bash
-cd /path/to/opencode-go
-go build -o opencode ./cmd/opencode
+cd /path/to/openmarmut-go
+go build -o openmarmut ./cmd/openmarmut
 ```
 
 Verify:
 
 ```bash
-./opencode --help
+./openmarmut --help
 ```
 
 Expected output:
@@ -24,7 +24,7 @@ Expected output:
 CLI tool for AI-assisted development with local or Docker runtimes
 
 Usage:
-  opencode [command]
+  openmarmut [command]
 
 Available Commands:
   ask         Ask the AI a question (single-turn, no tools)
@@ -41,7 +41,7 @@ Available Commands:
 
 Flags:
   -c, --config string       config file path
-  -h, --help                help for opencode
+  -h, --help                help for openmarmut
       --log-format string   log format: text/json
       --log-level string    log level: debug/info/warn/error
   -m, --mode string         runtime mode: "local" or "docker"
@@ -50,7 +50,7 @@ Flags:
   -t, --target string       target directory (default: cwd)
       --temperature float   sampling temperature (0.0–2.0)
 
-Use "opencode [command] --help" for more information about a command.
+Use "openmarmut [command] --help" for more information about a command.
 ```
 
 ---
@@ -67,7 +67,7 @@ echo "Created demo dir: $DEMO_DIR"
 ### 2.2 Show runtime info
 
 ```bash
-./opencode -t "$DEMO_DIR" info
+./openmarmut -t "$DEMO_DIR" info
 ```
 
 Expected:
@@ -79,8 +79,8 @@ Target directory: /tmp/tmp.XXXXXXXX
 ### 2.3 Create directories
 
 ```bash
-./opencode -t "$DEMO_DIR" mkdir src
-./opencode -t "$DEMO_DIR" mkdir src/utils
+./openmarmut -t "$DEMO_DIR" mkdir src
+./openmarmut -t "$DEMO_DIR" mkdir src/utils
 ```
 
 No output on success.
@@ -93,11 +93,11 @@ echo 'package main
 import "fmt"
 
 func main() {
-    fmt.Println("hello from opencode")
-}' | ./opencode -t "$DEMO_DIR" write src/main.go
+    fmt.Println("hello from openmarmut")
+}' | ./openmarmut -t "$DEMO_DIR" write src/main.go
 
-echo '# My Project' | ./opencode -t "$DEMO_DIR" write README.md
-echo 'module demo' | ./opencode -t "$DEMO_DIR" write go.mod
+echo '# My Project' | ./openmarmut -t "$DEMO_DIR" write README.md
+echo 'module demo' | ./openmarmut -t "$DEMO_DIR" write go.mod
 ```
 
 No output on success.
@@ -107,7 +107,7 @@ No output on success.
 Root of the project:
 
 ```bash
-./opencode -t "$DEMO_DIR" ls
+./openmarmut -t "$DEMO_DIR" ls
 ```
 
 Expected (your sizes/perms may vary):
@@ -121,7 +121,7 @@ d  -rwxr-xr-x  4096        src
 Nested directory:
 
 ```bash
-./opencode -t "$DEMO_DIR" ls src
+./openmarmut -t "$DEMO_DIR" ls src
 ```
 
 Expected:
@@ -134,7 +134,7 @@ d  -rwxr-xr-x  4096        utils
 ### 2.6 Read a file
 
 ```bash
-./opencode -t "$DEMO_DIR" read src/main.go
+./openmarmut -t "$DEMO_DIR" read src/main.go
 ```
 
 Expected:
@@ -145,7 +145,7 @@ package main
 import "fmt"
 
 func main() {
-    fmt.Println("hello from opencode")
+    fmt.Println("hello from openmarmut")
 }
 ```
 
@@ -154,7 +154,7 @@ func main() {
 Simple command:
 
 ```bash
-./opencode -t "$DEMO_DIR" exec "ls -1"
+./openmarmut -t "$DEMO_DIR" exec "ls -1"
 ```
 
 Expected:
@@ -168,7 +168,7 @@ src
 Command with environment variables:
 
 ```bash
-./opencode -t "$DEMO_DIR" exec -e GREETING=hello "echo \$GREETING world"
+./openmarmut -t "$DEMO_DIR" exec -e GREETING=hello "echo \$GREETING world"
 ```
 
 Expected:
@@ -180,7 +180,7 @@ hello world
 Command in a subdirectory:
 
 ```bash
-./opencode -t "$DEMO_DIR" exec -w src "ls -1"
+./openmarmut -t "$DEMO_DIR" exec -w src "ls -1"
 ```
 
 Expected:
@@ -193,8 +193,8 @@ utils
 ### 2.8 Overwrite a file
 
 ```bash
-echo '# My Updated Project' | ./opencode -t "$DEMO_DIR" write README.md
-./opencode -t "$DEMO_DIR" read README.md
+echo '# My Updated Project' | ./openmarmut -t "$DEMO_DIR" write README.md
+./openmarmut -t "$DEMO_DIR" read README.md
 ```
 
 Expected:
@@ -206,8 +206,8 @@ Expected:
 ### 2.9 Delete a file
 
 ```bash
-./opencode -t "$DEMO_DIR" delete go.mod
-./opencode -t "$DEMO_DIR" ls
+./openmarmut -t "$DEMO_DIR" delete go.mod
+./openmarmut -t "$DEMO_DIR" ls
 ```
 
 Expected — `go.mod` is gone:
@@ -241,7 +241,7 @@ echo "Created demo dir: $DEMO_DIR"
 Rather than passing flags on every command, create a config file:
 
 ```bash
-cat > "$DEMO_DIR/.opencode.yaml" << 'EOF'
+cat > "$DEMO_DIR/.openmarmut.yaml" << 'EOF'
 mode: docker
 docker:
   image: ubuntu:20.04
@@ -253,7 +253,7 @@ EOF
 ### 3.3 Show runtime info
 
 ```bash
-./opencode -t "$DEMO_DIR" info
+./openmarmut -t "$DEMO_DIR" info
 ```
 
 Expected:
@@ -269,30 +269,30 @@ You can verify a container was created and destroyed by watching in another term
 watch docker ps
 ```
 
-Each opencode command creates a container, runs the operation, and destroys it.
+Each openmarmut command creates a container, runs the operation, and destroys it.
 
 ### 3.4 Create directories and write files
 
 ```bash
-./opencode -t "$DEMO_DIR" mkdir src
-echo 'print("hello from docker")' | ./opencode -t "$DEMO_DIR" write src/app.py
+./openmarmut -t "$DEMO_DIR" mkdir src
+echo 'print("hello from docker")' | ./openmarmut -t "$DEMO_DIR" write src/app.py
 ```
 
 ### 3.5 List and read
 
 ```bash
-./opencode -t "$DEMO_DIR" ls
+./openmarmut -t "$DEMO_DIR" ls
 ```
 
 Expected:
 
 ```
--  -rw-r--r--  89          .opencode.yaml
+-  -rw-r--r--  89          .openmarmut.yaml
 d  -rwxr-xr-x  4096        src
 ```
 
 ```bash
-./opencode -t "$DEMO_DIR" read src/app.py
+./openmarmut -t "$DEMO_DIR" read src/app.py
 ```
 
 Expected:
@@ -304,7 +304,7 @@ print("hello from docker")
 ### 3.6 Execute a command inside the container
 
 ```bash
-./opencode -t "$DEMO_DIR" exec "uname -a"
+./openmarmut -t "$DEMO_DIR" exec "uname -a"
 ```
 
 Expected (shows the container's kernel, not your host):
@@ -314,7 +314,7 @@ Linux <container-id> ...
 ```
 
 ```bash
-./opencode -t "$DEMO_DIR" exec "whoami"
+./openmarmut -t "$DEMO_DIR" exec "whoami"
 ```
 
 Expected (runs as your UID mapped in the container):
@@ -339,7 +339,7 @@ Expected: empty (container was stopped and removed).
 ### 3.8 Execute with env vars and working directory
 
 ```bash
-./opencode -t "$DEMO_DIR" exec -w src -e LANG=C "pwd && ls -1"
+./openmarmut -t "$DEMO_DIR" exec -w src -e LANG=C "pwd && ls -1"
 ```
 
 Expected:
@@ -352,7 +352,7 @@ app.py
 ### 3.9 Delete and clean up
 
 ```bash
-./opencode -t "$DEMO_DIR" delete src/app.py
+./openmarmut -t "$DEMO_DIR" delete src/app.py
 rm -rf "$DEMO_DIR"
 ```
 
@@ -362,12 +362,12 @@ rm -rf "$DEMO_DIR"
 
 ### 4.1 Config file
 
-Create a project with a `.opencode.yaml`:
+Create a project with a `.openmarmut.yaml`:
 
 ```bash
 export DEMO_DIR=$(mktemp -d)
 
-cat > "$DEMO_DIR/.opencode.yaml" << 'EOF'
+cat > "$DEMO_DIR/.openmarmut.yaml" << 'EOF'
 mode: local
 log:
   level: debug
@@ -379,7 +379,7 @@ EOF
 Now commands pick up the config automatically:
 
 ```bash
-./opencode -t "$DEMO_DIR" exec "echo hi"
+./openmarmut -t "$DEMO_DIR" exec "echo hi"
 ```
 
 Expected — you will see debug-level log lines on stderr before the output:
@@ -397,7 +397,7 @@ Environment variables override the config file:
 
 ```bash
 # Override mode (will fail without Docker, but demonstrates the override)
-OPENCODE_MODE=local OPENCODE_TARGET_DIR="$DEMO_DIR" ./opencode info
+OPENMARMUT_MODE=local OPENMARMUT_TARGET_DIR="$DEMO_DIR" ./openmarmut info
 ```
 
 Expected:
@@ -409,7 +409,7 @@ Target directory: /tmp/tmp.XXXXXXXX
 Override log level to suppress logs:
 
 ```bash
-OPENCODE_LOG_LEVEL=error ./opencode -t "$DEMO_DIR" exec "echo quiet"
+OPENMARMUT_LOG_LEVEL=error ./openmarmut -t "$DEMO_DIR" exec "echo quiet"
 ```
 
 Expected — no log lines, just:
@@ -421,7 +421,7 @@ quiet
 ### 4.3 Docker image via environment variable
 
 ```bash
-OPENCODE_MODE=docker OPENCODE_DOCKER_IMAGE=ubuntu:20.04 ./opencode -t "$DEMO_DIR" exec "echo from-docker"
+OPENMARMUT_MODE=docker OPENMARMUT_DOCKER_IMAGE=ubuntu:20.04 ./openmarmut -t "$DEMO_DIR" exec "echo from-docker"
 ```
 
 Expected (if Docker is running):
@@ -435,7 +435,7 @@ from-docker
 Flags always win, even over env vars and config files:
 
 ```bash
-OPENCODE_MODE=docker ./opencode -t "$DEMO_DIR" -m local exec "echo flags-win"
+OPENMARMUT_MODE=docker ./openmarmut -t "$DEMO_DIR" -m local exec "echo flags-win"
 ```
 
 Expected:
@@ -459,7 +459,7 @@ rm -rf "$DEMO_DIR"
 ```bash
 export DEMO_DIR=$(mktemp -d)
 
-./opencode -t "$DEMO_DIR" read ../../../etc/passwd
+./openmarmut -t "$DEMO_DIR" read ../../../etc/passwd
 ```
 
 Expected (exit code 1):
@@ -479,7 +479,7 @@ The exact message depends on the runtime, but the operation is always blocked.
 ### 5.2 Reading a file that does not exist
 
 ```bash
-./opencode -t "$DEMO_DIR" read nonexistent.txt
+./openmarmut -t "$DEMO_DIR" read nonexistent.txt
 ```
 
 Expected (exit code 1):
@@ -491,7 +491,7 @@ localrt.ReadFile(nonexistent.txt): open /tmp/tmp.XXXXXXXX/nonexistent.txt: no su
 ### 5.3 Deleting a file that does not exist
 
 ```bash
-./opencode -t "$DEMO_DIR" delete ghost.txt
+./openmarmut -t "$DEMO_DIR" delete ghost.txt
 ```
 
 Expected (exit code 1):
@@ -503,20 +503,20 @@ localrt.DeleteFile(ghost.txt): remove /tmp/tmp.XXXXXXXX/ghost.txt: no such file 
 ### 5.4 Command that fails with non-zero exit code
 
 ```bash
-./opencode -t "$DEMO_DIR" exec "exit 42"
-echo "opencode exit code: $?"
+./openmarmut -t "$DEMO_DIR" exec "exit 42"
+echo "openmarmut exit code: $?"
 ```
 
 Expected — the tool forwards the command's exit code:
 
 ```
-opencode exit code: 42
+openmarmut exit code: 42
 ```
 
 ### 5.5 Command that writes to stderr
 
 ```bash
-./opencode -t "$DEMO_DIR" exec "echo oops >&2 && exit 1"
+./openmarmut -t "$DEMO_DIR" exec "echo oops >&2 && exit 1"
 echo "exit code: $?"
 ```
 
@@ -532,7 +532,7 @@ exit code: 1
 If the Docker daemon is not running:
 
 ```bash
-OPENCODE_MODE=docker OPENCODE_DOCKER_IMAGE=ubuntu:20.04 ./opencode -t "$DEMO_DIR" info
+OPENMARMUT_MODE=docker OPENMARMUT_DOCKER_IMAGE=ubuntu:20.04 ./openmarmut -t "$DEMO_DIR" info
 ```
 
 Expected (exit code 1):
@@ -560,7 +560,7 @@ variable:
 ```bash
 export DEMO_DIR=$(mktemp -d)
 
-cat > "$DEMO_DIR/.opencode.yaml" << 'EOF'
+cat > "$DEMO_DIR/.openmarmut.yaml" << 'EOF'
 mode: local
 llm:
   active_provider: my-claude
@@ -579,7 +579,7 @@ for Azure, Groq, Together, vLLM, or any OpenAI-compatible endpoint.
 ### 6.2 List providers
 
 ```bash
-./opencode -t "$DEMO_DIR" providers
+./openmarmut -t "$DEMO_DIR" providers
 ```
 
 Expected:
@@ -595,7 +595,7 @@ when `endpoint_url` is omitted.
 ### 6.3 Multi-provider setup
 
 ```bash
-cat > "$DEMO_DIR/.opencode.yaml" << 'EOF'
+cat > "$DEMO_DIR/.openmarmut.yaml" << 'EOF'
 mode: local
 llm:
   active_provider: claude
@@ -613,7 +613,7 @@ llm:
       model: llama3.1
 EOF
 
-./opencode -t "$DEMO_DIR" providers
+./openmarmut -t "$DEMO_DIR" providers
 ```
 
 Expected:
@@ -628,7 +628,7 @@ Expected:
 Switch the active provider with `--provider`:
 
 ```bash
-./opencode -t "$DEMO_DIR" -p gpt providers
+./openmarmut -t "$DEMO_DIR" -p gpt providers
 ```
 
 Expected — the `*` moves to `gpt`:
@@ -647,7 +647,7 @@ Requires a valid API key in the environment for the active provider:
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-./opencode -t "$DEMO_DIR" ask "What is 2+2? Reply in one word."
+./openmarmut -t "$DEMO_DIR" ask "What is 2+2? Reply in one word."
 ```
 
 Expected (streamed token-by-token):
@@ -659,20 +659,20 @@ Four.
 Override the model on the fly:
 
 ```bash
-./opencode -t "$DEMO_DIR" --model claude-haiku-4-5-20251001 ask "Say hello in one word."
+./openmarmut -t "$DEMO_DIR" --model claude-haiku-4-5-20251001 ask "Say hello in one word."
 ```
 
 ### 6.5 Environment variable overrides
 
 ```bash
 # Switch active provider via env var
-OPENCODE_LLM_PROVIDER=gpt ./opencode -t "$DEMO_DIR" providers
+OPENMARMUT_LLM_PROVIDER=gpt ./openmarmut -t "$DEMO_DIR" providers
 
 # Override model via env var
-OPENCODE_LLM_MODEL=gpt-4o-mini ./opencode -t "$DEMO_DIR" ask "Say hi"
+OPENMARMUT_LLM_MODEL=gpt-4o-mini ./openmarmut -t "$DEMO_DIR" ask "Say hi"
 
 # Override API key via env var (useful in CI)
-OPENCODE_LLM_API_KEY=sk-test-key ./opencode -t "$DEMO_DIR" ask "Hello"
+OPENMARMUT_LLM_API_KEY=sk-test-key ./openmarmut -t "$DEMO_DIR" ask "Hello"
 ```
 
 Priority: flags > env vars > config file > single-entry fallback.
@@ -683,7 +683,7 @@ Missing API key:
 
 ```bash
 unset ANTHROPIC_API_KEY
-./opencode -t "$DEMO_DIR" ask "hello"
+./openmarmut -t "$DEMO_DIR" ask "hello"
 ```
 
 Expected (exit code 1):
@@ -695,7 +695,7 @@ ask: llm.NewProvider(my-claude): ResolveCredential: authentication failed — ch
 No providers configured:
 
 ```bash
-./opencode ask "hello"
+./openmarmut ask "hello"
 ```
 
 Expected (exit code 1):
@@ -707,7 +707,7 @@ ask: config.ResolveActiveProvider: no providers configured
 Active provider not found:
 
 ```bash
-./opencode -t "$DEMO_DIR" -p nonexistent ask "hello"
+./openmarmut -t "$DEMO_DIR" -p nonexistent ask "hello"
 ```
 
 Expected (exit code 1):
@@ -728,17 +728,17 @@ rm -rf "$DEMO_DIR"
 
 | Feature | Command |
 |---------|---------|
-| Read file | `opencode read <path>` |
-| Write file | `echo data \| opencode write <path>` |
-| Delete file | `opencode delete <path>` |
-| List dir | `opencode ls [path]` |
-| Create dir | `opencode mkdir <path>` |
-| Run command | `opencode exec "<cmd>"` |
-| Runtime info | `opencode info` |
-| List providers | `opencode providers` |
-| Ask AI | `opencode ask "question"` |
-| Target dir | `-t /path` or `OPENCODE_TARGET_DIR` |
+| Read file | `openmarmut read <path>` |
+| Write file | `echo data \| openmarmut write <path>` |
+| Delete file | `openmarmut delete <path>` |
+| List dir | `openmarmut ls [path]` |
+| Create dir | `openmarmut mkdir <path>` |
+| Run command | `openmarmut exec "<cmd>"` |
+| Runtime info | `openmarmut info` |
+| List providers | `openmarmut providers` |
+| Ask AI | `openmarmut ask "question"` |
+| Target dir | `-t /path` or `OPENMARMUT_TARGET_DIR` |
 | Docker mode | `-m docker` + config/env for image |
-| Select provider | `-p name` or `OPENCODE_LLM_PROVIDER` |
-| Override model | `--model name` or `OPENCODE_LLM_MODEL` |
-| Config file | `.opencode.yaml` in target dir |
+| Select provider | `-p name` or `OPENMARMUT_LLM_PROVIDER` |
+| Override model | `--model name` or `OPENMARMUT_LLM_MODEL` |
+| Config file | `.openmarmut.yaml` in target dir |

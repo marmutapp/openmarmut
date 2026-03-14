@@ -1,4 +1,4 @@
-# OpenCode-Go: Architecture Overview
+# OpenMarmut-Go: Architecture Overview
 
 ## High-Level Flow
 
@@ -38,7 +38,7 @@ User invokes CLI
 ## Dependency Graph
 
 ```
-cmd/opencode/main.go
+cmd/openmarmut/main.go
     └── internal/cli
 
 internal/cli

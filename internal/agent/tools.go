@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gajaai/opencode-go/internal/llm"
-	"github.com/gajaai/opencode-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/runtime"
 )
 
 // Tool defines a callable action backed by a Runtime method.

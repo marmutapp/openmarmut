@@ -1,4 +1,4 @@
-# OpenCode-Go: Detailed Function Design
+# OpenMarmut-Go: Detailed Function Design
 
 **Companion to:** specs/system-spec.md
 
@@ -68,8 +68,8 @@ func MustBeRelative(path string) error {
 
 **Merge order (highest → lowest):**
 1. CLI flags (from `flags`)
-2. Environment variables (prefix `OPENCODE_`)
-3. Config file (`.opencode.yaml` in CWD, then `~/.config/opencode/config.yaml`)
+2. Environment variables (prefix `OPENMARMUT_`)
+3. Config file (`.openmarmut.yaml` in CWD, then `~/.config/openmarmut/config.yaml`)
 4. Hardcoded defaults
 
 **Implementation:**
@@ -78,7 +78,7 @@ func MustBeRelative(path string) error {
    Docker.MountPath="/workspace", Docker.Shell="sh", Docker.NetworkMode="none"
 2. Try config file:
    a. If flags.ConfigPath set → use it (error if not found)
-   b. Else try .opencode.yaml in CWD, then ~/.config/opencode/config.yaml
+   b. Else try .openmarmut.yaml in CWD, then ~/.config/openmarmut/config.yaml
    c. If found → unmarshal YAML, overlay onto defaults
 3. Read env vars, overlay non-empty values
 4. Apply flags overrides for non-nil fields

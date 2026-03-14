@@ -3,8 +3,8 @@ package agent
 import (
 	"strings"
 
-	"github.com/gajaai/opencode-go/internal/config"
-	"github.com/gajaai/opencode-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/config"
+	"github.com/gajaai/openmarmut-go/internal/llm"
 )
 
 const redactedPlaceholder = "[REDACTED]"

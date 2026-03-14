@@ -1,5 +1,5 @@
 # Binaries
-/opencode
+/openmarmut
 *.exe
 *.dll
 *.so

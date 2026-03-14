@@ -74,8 +74,8 @@ All file methods check `ctx.Err()` at the top. `Exec` uses `context.WithTimeout`
 1. **`New` takes `defaultTimeout`** — this is not in the `Runtime` interface. The CLI/factory layer needs to pass `config.DefaultTimeout` when constructing.
 2. **Process group kill uses `syscall`** — Linux-only. If cross-platform support is needed, this needs build tags.
 3. **`ListDir` calls `Info()` per entry** — one extra syscall per entry. Acceptable for typical directory sizes.
-4. **`WriteFile` temp files** use `.opencode-tmp-*` prefix — visible briefly during writes. Cleaned up on failure via deferred remove.
+4. **`WriteFile` temp files** use `.openmarmut-tmp-*` prefix — visible briefly during writes. Cleaned up on failure via deferred remove.
 
 ## What's next
 
-Phase 4: CLI layer (`internal/cli/` + `cmd/opencode/main.go`). The CLI will construct `LocalRuntime` via the Runner lifecycle pattern.
+Phase 4: CLI layer (`internal/cli/` + `cmd/openmarmut/main.go`). The CLI will construct `LocalRuntime` via the Runner lifecycle pattern.

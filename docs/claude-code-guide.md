@@ -1,4 +1,4 @@
-# Claude Code Operating Guide for OpenCode-Go
+# Claude Code Operating Guide for OpenMarmut-Go
 
 How to build this project with Claude Code across multiple sessions without losing context or progress.
 
@@ -109,7 +109,7 @@ More reliable than compaction because you control what transfers.
 
 ---
 
-## Session Plan for OpenCode-Go
+## Session Plan for OpenMarmut-Go
 
 ### Session 1: Foundation
 ```
@@ -126,8 +126,8 @@ May need document-and-clear if context fills up.
 
 ### Session 3: CLI
 ```
-Implement internal/cli (root, runner, all commands) and cmd/opencode/main.go.
-Manual smoke test: go run ./cmd/opencode read README.md
+Implement internal/cli (root, runner, all commands) and cmd/openmarmut/main.go.
+Manual smoke test: go run ./cmd/openmarmut read README.md
 ```
 
 ### Session 4: Docker Runtime

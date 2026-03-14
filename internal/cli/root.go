@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"github.com/gajaai/opencode-go/internal/config"
+	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ func NewRootCmd() *cobra.Command {
 	)
 
 	root := &cobra.Command{
-		Use:           "opencode",
+		Use:           "openmarmut",
 		Short:         "CLI tool for AI-assisted development with local or Docker runtimes",
 		SilenceUsage:  true,
 		SilenceErrors: true,

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gajaai/opencode-go/internal/config"
+	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

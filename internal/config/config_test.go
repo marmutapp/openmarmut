@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gajaai/opencode-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,8 +29,8 @@ func TestDefaults(t *testing.T) {
 
 func TestLoad_DefaultsWithNoOverrides(t *testing.T) {
 	// Ensure no env vars interfere.
-	for _, key := range []string{"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
-		"OPENCODE_LOG_FORMAT", "OPENCODE_DOCKER_IMAGE", "OPENCODE_DEFAULT_TIMEOUT"} {
+	for _, key := range []string{"OPENMARMUT_MODE", "OPENMARMUT_TARGET_DIR", "OPENMARMUT_LOG_LEVEL",
+		"OPENMARMUT_LOG_FORMAT", "OPENMARMUT_DOCKER_IMAGE", "OPENMARMUT_DEFAULT_TIMEOUT"} {
 		t.Setenv(key, "")
 	}
 
@@ -44,7 +44,7 @@ func TestLoad_DefaultsWithNoOverrides(t *testing.T) {
 }
 
 func TestLoad_FlagsOverrideDefaults(t *testing.T) {
-	for _, key := range []string{"OPENCODE_MODE", "OPENCODE_LOG_LEVEL", "OPENCODE_LOG_FORMAT"} {
+	for _, key := range []string{"OPENMARMUT_MODE", "OPENMARMUT_LOG_LEVEL", "OPENMARMUT_LOG_FORMAT"} {
 		t.Setenv(key, "")
 	}
 
@@ -67,11 +67,11 @@ func TestLoad_FlagsOverrideDefaults(t *testing.T) {
 
 func TestLoad_EnvOverridesDefaults(t *testing.T) {
 	targetDir := t.TempDir()
-	t.Setenv("OPENCODE_MODE", "local")
-	t.Setenv("OPENCODE_TARGET_DIR", targetDir)
-	t.Setenv("OPENCODE_LOG_LEVEL", "warn")
-	t.Setenv("OPENCODE_LOG_FORMAT", "json")
-	t.Setenv("OPENCODE_DEFAULT_TIMEOUT", "60s")
+	t.Setenv("OPENMARMUT_MODE", "local")
+	t.Setenv("OPENMARMUT_TARGET_DIR", targetDir)
+	t.Setenv("OPENMARMUT_LOG_LEVEL", "warn")
+	t.Setenv("OPENMARMUT_LOG_FORMAT", "json")
+	t.Setenv("OPENMARMUT_DEFAULT_TIMEOUT", "60s")
 
 	cfg, err := Load(nil)
 	require.NoError(t, err)
@@ -85,9 +85,9 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 
 func TestLoad_FlagsOverrideEnv(t *testing.T) {
 	targetDir := t.TempDir()
-	t.Setenv("OPENCODE_MODE", "local")
-	t.Setenv("OPENCODE_LOG_LEVEL", "warn")
-	t.Setenv("OPENCODE_TARGET_DIR", targetDir)
+	t.Setenv("OPENMARMUT_MODE", "local")
+	t.Setenv("OPENMARMUT_LOG_LEVEL", "warn")
+	t.Setenv("OPENMARMUT_TARGET_DIR", targetDir)
 
 	flags := &FlagOverrides{
 		LogLevel: strPtr("error"),
@@ -114,8 +114,8 @@ default_timeout: 45s
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
 
 	// Clear env vars.
-	for _, key := range []string{"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
-		"OPENCODE_LOG_FORMAT", "OPENCODE_DEFAULT_TIMEOUT"} {
+	for _, key := range []string{"OPENMARMUT_MODE", "OPENMARMUT_TARGET_DIR", "OPENMARMUT_LOG_LEVEL",
+		"OPENMARMUT_LOG_FORMAT", "OPENMARMUT_DEFAULT_TIMEOUT"} {
 		t.Setenv(key, "")
 	}
 
@@ -145,8 +145,8 @@ func TestLoad_ConfigFileNotFound(t *testing.T) {
 }
 
 func TestLoad_RelativeTargetDirResolved(t *testing.T) {
-	for _, key := range []string{"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
-		"OPENCODE_LOG_FORMAT"} {
+	for _, key := range []string{"OPENMARMUT_MODE", "OPENMARMUT_TARGET_DIR", "OPENMARMUT_LOG_LEVEL",
+		"OPENMARMUT_LOG_FORMAT"} {
 		t.Setenv(key, "")
 	}
 
@@ -437,9 +437,9 @@ llm:
 	configPath := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
 
-	for _, key := range []string{"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
-		"OPENCODE_LOG_FORMAT", "OPENCODE_DEFAULT_TIMEOUT",
-		"OPENCODE_LLM_PROVIDER", "OPENCODE_LLM_MODEL", "OPENCODE_LLM_API_KEY"} {
+	for _, key := range []string{"OPENMARMUT_MODE", "OPENMARMUT_TARGET_DIR", "OPENMARMUT_LOG_LEVEL",
+		"OPENMARMUT_LOG_FORMAT", "OPENMARMUT_DEFAULT_TIMEOUT",
+		"OPENMARMUT_LLM_PROVIDER", "OPENMARMUT_LLM_MODEL", "OPENMARMUT_LLM_API_KEY"} {
 		t.Setenv(key, "")
 	}
 
@@ -479,13 +479,13 @@ llm:
 	configPath := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
 
-	for _, key := range []string{"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
-		"OPENCODE_LOG_FORMAT", "OPENCODE_DEFAULT_TIMEOUT"} {
+	for _, key := range []string{"OPENMARMUT_MODE", "OPENMARMUT_TARGET_DIR", "OPENMARMUT_LOG_LEVEL",
+		"OPENMARMUT_LOG_FORMAT", "OPENMARMUT_DEFAULT_TIMEOUT"} {
 		t.Setenv(key, "")
 	}
-	t.Setenv("OPENCODE_LLM_PROVIDER", "claude")
-	t.Setenv("OPENCODE_LLM_MODEL", "claude-opus")
-	t.Setenv("OPENCODE_LLM_API_KEY", "test-key-123")
+	t.Setenv("OPENMARMUT_LLM_PROVIDER", "claude")
+	t.Setenv("OPENMARMUT_LLM_MODEL", "claude-opus")
+	t.Setenv("OPENMARMUT_LLM_API_KEY", "test-key-123")
 
 	cfg, err := Load(&FlagOverrides{ConfigPath: &configPath})
 	require.NoError(t, err)
@@ -513,13 +513,13 @@ llm:
 	configPath := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
 
-	for _, key := range []string{"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
-		"OPENCODE_LOG_FORMAT", "OPENCODE_DEFAULT_TIMEOUT"} {
+	for _, key := range []string{"OPENMARMUT_MODE", "OPENMARMUT_TARGET_DIR", "OPENMARMUT_LOG_LEVEL",
+		"OPENMARMUT_LOG_FORMAT", "OPENMARMUT_DEFAULT_TIMEOUT"} {
 		t.Setenv(key, "")
 	}
-	t.Setenv("OPENCODE_LLM_PROVIDER", "openai")
-	t.Setenv("OPENCODE_LLM_MODEL", "")
-	t.Setenv("OPENCODE_LLM_API_KEY", "")
+	t.Setenv("OPENMARMUT_LLM_PROVIDER", "openai")
+	t.Setenv("OPENMARMUT_LLM_MODEL", "")
+	t.Setenv("OPENMARMUT_LLM_API_KEY", "")
 
 	temp := 0.7
 	flags := &FlagOverrides{
@@ -714,8 +714,8 @@ llm:
       type: ollama
       model: llama3.1
 `
-	// Write .opencode.yaml inside the target dir, not cwd.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".opencode.yaml"), []byte(configContent), 0o644))
+	// Write .openmarmut.yaml inside the target dir, not cwd.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".openmarmut.yaml"), []byte(configContent), 0o644))
 
 	clearLLMEnv(t)
 
@@ -741,10 +741,10 @@ llm:
       type: anthropic
       model: claude-sonnet
 `
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".opencode.yaml"), []byte(configContent), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".openmarmut.yaml"), []byte(configContent), 0o644))
 
 	clearLLMEnv(t)
-	t.Setenv("OPENCODE_TARGET_DIR", dir)
+	t.Setenv("OPENMARMUT_TARGET_DIR", dir)
 
 	cfg, err := Load(nil)
 	require.NoError(t, err)
@@ -757,9 +757,9 @@ llm:
 func clearLLMEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"OPENCODE_MODE", "OPENCODE_TARGET_DIR", "OPENCODE_LOG_LEVEL",
-		"OPENCODE_LOG_FORMAT", "OPENCODE_DEFAULT_TIMEOUT",
-		"OPENCODE_LLM_PROVIDER", "OPENCODE_LLM_MODEL", "OPENCODE_LLM_API_KEY",
+		"OPENMARMUT_MODE", "OPENMARMUT_TARGET_DIR", "OPENMARMUT_LOG_LEVEL",
+		"OPENMARMUT_LOG_FORMAT", "OPENMARMUT_DEFAULT_TIMEOUT",
+		"OPENMARMUT_LLM_PROVIDER", "OPENMARMUT_LLM_MODEL", "OPENMARMUT_LLM_API_KEY",
 	} {
 		t.Setenv(key, "")
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gajaai/opencode-go/internal/cli"
+	"github.com/gajaai/openmarmut-go/internal/cli"
 )
 
 func main() {

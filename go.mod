@@ -1,4 +1,4 @@
-module github.com/gajaai/opencode-go
+module github.com/gajaai/openmarmut-go
 
 go 1.25.0
 

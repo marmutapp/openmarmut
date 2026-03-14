@@ -1,4 +1,4 @@
-# OpenCode-Go
+# OpenMarmut-Go
 
 ## What This Is
 CLI tool in Go. Two runtime modes (local, Docker) behind a unified `Runtime` interface.
@@ -12,7 +12,7 @@ Local mode: host filesystem + os/exec. Docker mode: Docker SDK, bind-mounted con
 - `internal/pathutil/` — Path sandboxing (prevent traversal attacks)
 - `internal/logger/` — slog wrapper
 - `internal/cli/` — Cobra commands + Runner lifecycle
-- `cmd/opencode/` — main.go entrypoint
+- `cmd/openmarmut/` — main.go entrypoint
 
 ## Key Design Rules
 - Single `Runtime` interface owns BOTH file ops and command execution
