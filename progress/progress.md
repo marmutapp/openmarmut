@@ -116,7 +116,7 @@
 ### Phase 7c: Polish
 - [ ] Context window management — token counting, history summarization
 - [x] Retry logic — RetryProvider wrapper with exponential backoff (1s/2s/4s), max 3 retries, Retry-After support
-- [ ] Cost tracking — token usage display
+- [x] Cost tracking — EstimateCost/FormatCost with model price map, displayed in ask/chat CLI output
 
 ---
 

@@ -86,8 +86,12 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				fmt.Fprintln(os.Stdout)
 
 				if len(result.Steps) > 0 {
-					fmt.Fprintf(os.Stderr, "[%d tool calls | %d tokens]\n",
-						len(result.Steps), result.Usage.TotalTokens)
+					costStr := llm.FormatCost(result.Usage, provider.Model())
+					if costStr != "" {
+						costStr = " | ~" + costStr
+					}
+					fmt.Fprintf(os.Stderr, "[%d tool calls | %d tokens%s]\n",
+						len(result.Steps), result.Usage.TotalTokens, costStr)
 				}
 				fmt.Fprintln(os.Stderr)
 			}
