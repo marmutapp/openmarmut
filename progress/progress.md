@@ -159,9 +159,18 @@
 - [x] ask.go — non-interactive mode auto-approves all tools
 - [x] 23 permission tests (unit + 3 integration tests in agent loop)
 
-## Phase 10: Project Rename
+## Phase 10: UI & Polish
 
+### Phase 10.1: Project Rename
 - [x] Rename project from OpenCode to OpenMarmut — go.mod, all imports, CLI command, env vars, config files, docs, specs, tests
+
+### Phase 10.2: UI Style System
+- [x] `internal/ui/tty.go` — TTY detection, NO_COLOR/FORCE_COLOR, lipgloss profile sync
+- [x] `internal/ui/styles.go` — color palette, 15 named styles, 9 helper functions (FormatError/Success/Warning/ToolCall/Summary/KeyValue, RenderBox/Table, HumanizeBytes)
+- [x] `internal/ui/spinner.go` — goroutine spinner with braille frames, 80ms cycle, TTY-aware
+- [x] `internal/ui/styles_test.go` — 19 tests (helpers, table, box, bytes, color on/off)
+- [x] `internal/ui/spinner_test.go` — 4 tests (start/stop, idempotent, no-TTY, default message)
+- [x] Dependencies: charmbracelet/lipgloss, charmbracelet/glamour
 
 ---
 
@@ -201,6 +210,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-14 | Phase 8 | Advanced agent capabilities: 4 new tools (grep_files, find_files, patch_file, read_file_lines), context window management with auto-truncation, chat REPL improvements (streaming, inline tool calls, slash commands). 38 new tests across 3 commits. | Start Phase 9: permissions
 2026-03-14 | Phase 9 | Permission & confirmation system: PermissionChecker with auto/confirm/deny levels, interactive y/n/always UI in chat, FormatToolPreview, BuildPermissions from config, --auto-approve flag, AgentConfig in config. 23 new tests. | All phases done
 
-2026-03-15 | Phase 10 | Renamed project from OpenCode to OpenMarmut: go.mod module path, all imports, cmd/opencode→cmd/openmarmut, CLI root command, env var prefix OPENCODE_→OPENMARMUT_, config file .opencode.yaml→.openmarmut.yaml, all docs/specs/progress/rules. All 16 packages pass. | All phases done
+2026-03-15 | Phase 10.1 | Renamed project from OpenCode to OpenMarmut: go.mod module path, all imports, cmd/opencode→cmd/openmarmut, CLI root command, env var prefix OPENCODE_→OPENMARMUT_, config file .opencode.yaml→.openmarmut.yaml, all docs/specs/progress/rules. All 16 packages pass. | Phase 10.2: UI style system
+2026-03-15 | Phase 10.2 | UI style system: internal/ui package with tty.go (TTY/NO_COLOR detection, lipgloss profile sync), styles.go (6 colors, 15 named styles, 9 helpers), spinner.go (braille animation, goroutine-based). 23 tests. Dependencies: lipgloss + glamour. All 17 packages pass. | Wire UI into CLI commands
 
 <!-- Claude: append a new line here after each working session -->
