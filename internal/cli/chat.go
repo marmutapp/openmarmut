@@ -31,10 +31,11 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				return fmt.Errorf("chat: %w", err)
 			}
 
-			provider, err := llm.NewProvider(*entry, log)
+			rawProvider, err := llm.NewProvider(*entry, log)
 			if err != nil {
 				return fmt.Errorf("chat: %w", err)
 			}
+			provider := llm.NewRetryProvider(rawProvider, llm.RetryConfig{}, log)
 
 			rt, err := initRuntime(cmd.Context(), cfg, log)
 			if err != nil {

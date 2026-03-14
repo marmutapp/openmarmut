@@ -399,6 +399,9 @@ func (p *Provider) checkError(resp *http.Response) error {
 	case 404:
 		return fmt.Errorf("openai.Complete: %w: %s", llm.ErrModelNotFound, msg)
 	default:
+		if resp.StatusCode >= 500 {
+			return fmt.Errorf("openai.Complete: %w: HTTP %d: %s", llm.ErrServerError, resp.StatusCode, msg)
+		}
 		return fmt.Errorf("openai.Complete: HTTP %d: %s", resp.StatusCode, msg)
 	}
 }

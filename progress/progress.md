@@ -115,7 +115,7 @@
 
 ### Phase 7c: Polish
 - [ ] Context window management — token counting, history summarization
-- [ ] Retry logic — exponential backoff for rate limits
+- [x] Retry logic — RetryProvider wrapper with exponential backoff (1s/2s/4s), max 3 retries, Retry-After support
 - [ ] Cost tracking — token usage display
 
 ---

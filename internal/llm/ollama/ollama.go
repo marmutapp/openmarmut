@@ -326,6 +326,9 @@ func (p *Provider) checkError(resp *http.Response) error {
 	case 404:
 		return fmt.Errorf("ollama.Complete: %w: %s", llm.ErrModelNotFound, msg)
 	default:
+		if resp.StatusCode >= 500 {
+			return fmt.Errorf("ollama.Complete: %w: HTTP %d: %s", llm.ErrServerError, resp.StatusCode, msg)
+		}
 		return fmt.Errorf("ollama.Complete: HTTP %d: %s", resp.StatusCode, msg)
 	}
 }

@@ -375,6 +375,9 @@ func (p *Provider) checkError(resp *http.Response) error {
 	case 404:
 		return fmt.Errorf("gemini.Complete: %w: %s", llm.ErrModelNotFound, msg)
 	default:
+		if resp.StatusCode >= 500 {
+			return fmt.Errorf("gemini.Complete: %w: HTTP %d: %s", llm.ErrServerError, resp.StatusCode, msg)
+		}
 		return fmt.Errorf("gemini.Complete: HTTP %d: %s", resp.StatusCode, msg)
 	}
 }

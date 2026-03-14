@@ -40,10 +40,11 @@ func newAskCmd(runner *Runner) *cobra.Command {
 				return fmt.Errorf("ask: %w", err)
 			}
 
-			provider, err := llm.NewProvider(*entry, log)
+			rawProvider, err := llm.NewProvider(*entry, log)
 			if err != nil {
 				return fmt.Errorf("ask: %w", err)
 			}
+			provider := llm.NewRetryProvider(rawProvider, llm.RetryConfig{}, log)
 
 			question := strings.Join(args, " ")
 

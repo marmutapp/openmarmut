@@ -107,6 +107,7 @@ type AuthConfig struct {
 var (
 	ErrAuthFailed     = errors.New("authentication failed — check API key")
 	ErrRateLimited    = errors.New("rate limited by provider")
+	ErrServerError    = errors.New("server error from provider")
 	ErrModelNotFound  = errors.New("model not found")
 	ErrContextTooLong = errors.New("input exceeds model context window")
 	ErrStreamAborted  = errors.New("stream aborted by callback")
