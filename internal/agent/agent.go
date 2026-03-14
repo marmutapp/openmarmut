@@ -47,16 +47,17 @@ type Step struct {
 
 // Agent orchestrates the observe→plan→act→verify loop.
 type Agent struct {
-	provider      llm.Provider
-	rt            runtime.Runtime
-	tools         []Tool
-	toolMap       map[string]Tool
-	logger        *slog.Logger
-	history       []llm.Message
-	maxIterations int
-	systemPrompt  string
-	temperature   *float64
-	maxTokens     *int
+	provider       llm.Provider
+	rt             runtime.Runtime
+	tools          []Tool
+	toolMap        map[string]Tool
+	logger         *slog.Logger
+	history        []llm.Message
+	maxIterations  int
+	systemPrompt   string
+	temperature    *float64
+	maxTokens      *int
+	credentialKeys []string
 }
 
 // Option configures the Agent.
@@ -80,6 +81,11 @@ func WithTemperature(t *float64) Option {
 // WithMaxTokens sets the max output tokens for requests.
 func WithMaxTokens(m *int) Option {
 	return func(a *Agent) { a.maxTokens = m }
+}
+
+// WithCredentialKeys sets the credential values to detect and redact.
+func WithCredentialKeys(keys []string) Option {
+	return func(a *Agent) { a.credentialKeys = keys }
 }
 
 // New creates an Agent with the given provider and runtime.
@@ -160,6 +166,9 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 
 		// Execute each tool call and append results.
 		for _, tc := range resp.ToolCalls {
+			// Redact credentials in tool call arguments before execution.
+			redactedArgs := RedactCredentials(tc.Arguments, a.credentialKeys)
+
 			step := Step{ToolCall: tc}
 
 			tool, ok := a.toolMap[tc.Name]
@@ -167,13 +176,20 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 				step.Error = fmt.Sprintf("unknown tool: %s", tc.Name)
 				step.Output = step.Error
 				a.logger.Warn("unknown tool call", "name", tc.Name)
+			} else if tc.Name == "execute_command" && DetectCredentialLeak(tc.Arguments, a.credentialKeys) {
+				step.Error = ErrCredentialLeak.Error()
+				step.Output = "error: command blocked — it contains a credential value. " +
+					"Never include API keys or secrets in shell commands."
+				a.logger.Warn("credential leak blocked", "tool", tc.Name)
 			} else {
-				output, execErr := tool.Execute(ctx, a.rt, json.RawMessage(tc.Arguments))
+				output, execErr := tool.Execute(ctx, a.rt, json.RawMessage(redactedArgs))
 				if execErr != nil {
 					step.Error = execErr.Error()
 					step.Output = fmt.Sprintf("error: %s", execErr.Error())
 					a.logger.Debug("tool execution failed", "tool", tc.Name, "error", execErr)
 				} else {
+					// Redact credentials in tool output before sending back to LLM.
+					output = RedactCredentials(output, a.credentialKeys)
 					step.Output = output
 					a.logger.Debug("tool executed", "tool", tc.Name)
 				}

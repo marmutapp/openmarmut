@@ -94,7 +94,7 @@
 - [x] `internal/agent/agent.go` — Agent loop (observe→plan→act→verify), 21 tests
 - [x] `internal/agent/tools.go` — 6 tools mapped to Runtime methods (read_file, write_file, delete_file, list_dir, mkdir, execute_command)
 - [x] `internal/agent/agent_test.go` — Agent loop tests with mock provider and runtime (streaming after tool calls verified)
-- [ ] `internal/agent/security.go` — ContainsAPIKey, credential redaction
+- [x] `internal/agent/security.go` — RedactCredentials, DetectCredentialLeak, CollectCredentials, wired into agent loop
 - [x] `internal/cli/ask.go` — `opencode ask` with agent loop + `--no-tools` flag for simple questions
 - [x] `internal/cli/chat.go` — `opencode chat` interactive REPL with multi-turn agent loop
 - [x] `internal/cli/providers.go` — `opencode providers` list command
@@ -150,5 +150,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-14 | Phase 7b | All 4 remaining wire formats implemented: openai-responses (18 tests), gemini (15 tests), ollama (15 tests), custom (19 tests). Updated ask.go imports to register all 6 provider types. 67 new tests across 4 packages. | Continue Phase 7a: agent loop, chat REPL
 2026-03-14 | Phase 7a | Agent loop implemented: tools.go (6 tools → Runtime), agent.go (loop with max iterations, usage aggregation, history), 21 tests. CLI wired: ask uses agent loop with --no-tools flag, chat REPL added. | Phase 7a nearly complete, remaining: security.go
 2026-03-14 | Phase 7a+7b | Bug fixes: responses provider tool call serialization (call_id, empty assistant msg), endpoint URL path detection, streaming after tool calls. Tested end-to-end with Azure OpenAI gpt-5.1-codex-mini. Phase 7a+7b complete except security.go. | Start Phase 7c or security.go
+2026-03-14 | Phase 7a | Implemented security.go: RedactCredentials, DetectCredentialLeak, CollectCredentials. Wired into agent loop — args redacted before execution, execute_command blocked on credential leak, tool output redacted before sending to LLM. 30 tests (21 existing + 9 security). Phase 7a complete. | Start Phase 7c
 
 <!-- Claude: append a new line here after each working session -->
