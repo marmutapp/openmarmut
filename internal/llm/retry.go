@@ -3,9 +3,12 @@ package llm
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"math"
+	"net"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -121,6 +124,39 @@ func (r *RetryProvider) timerChan(d time.Duration) <-chan time.Time {
 }
 
 // isRetryable returns true for errors that warrant a retry.
+// This includes rate limits, server errors, and transient network errors
+// (connection reset, connection refused, timeouts, EOF).
 func isRetryable(err error) bool {
-	return errors.Is(err, ErrRateLimited) || errors.Is(err, ErrServerError)
+	if errors.Is(err, ErrRateLimited) || errors.Is(err, ErrServerError) {
+		return true
+	}
+
+	// EOF — connection dropped mid-response.
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+
+	// net.Error covers timeouts and temporary network failures.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	// net.OpError covers connection refused, connection reset, etc.
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+
+	// Fallback: check error message for common network error strings
+	// that may be wrapped in ways that don't implement net.Error.
+	msg := err.Error()
+	if strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "no such host") {
+		return true
+	}
+
+	return false
 }

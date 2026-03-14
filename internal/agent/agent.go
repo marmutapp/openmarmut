@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/gajaai/opencode-go/internal/llm"
 	"github.com/gajaai/opencode-go/internal/runtime"
@@ -45,9 +46,10 @@ var ErrMaxIterations = errors.New("agent: max iterations reached")
 
 // Result holds the outcome of an agent run.
 type Result struct {
-	Response string    // Final text response from the model.
-	Steps    []Step    // Executed tool calls and their results.
-	Usage    llm.Usage // Aggregated token usage across all turns.
+	Response string        // Final text response from the model.
+	Steps    []Step        // Executed tool calls and their results.
+	Usage    llm.Usage     // Aggregated token usage across all turns.
+	Duration time.Duration // Wall clock time for all LLM calls (excludes tool execution).
 }
 
 // Step records one tool invocation within an agent run.
@@ -172,7 +174,9 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 			MaxTokens:   a.maxTokens,
 		}
 
+		callStart := time.Now()
 		resp, err := a.provider.Complete(ctx, req, stream)
+		result.Duration += time.Since(callStart)
 		if err != nil {
 			return nil, fmt.Errorf("agent.Run: %w", err)
 		}

@@ -109,18 +109,30 @@ func newAskCmd(runner *Runner) *cobra.Command {
 
 			fmt.Fprintln(os.Stdout)
 
-			if len(result.Steps) > 0 {
+			{
 				costStr := llm.FormatCost(result.Usage, provider.Model())
 				if costStr != "" {
 					costStr = " | ~" + costStr
 				}
-				fmt.Fprintf(os.Stderr, "\n[%d tool calls | %d prompt + %d completion = %d tokens%s]\n",
-					len(result.Steps),
-					result.Usage.PromptTokens,
-					result.Usage.CompletionTokens,
-					result.Usage.TotalTokens,
-					costStr,
-				)
+				elapsed := fmt.Sprintf("%.1fs", result.Duration.Seconds())
+				if len(result.Steps) > 0 {
+					fmt.Fprintf(os.Stderr, "\n[%d tool calls | %d + %d = %d tokens%s | %s]\n",
+						len(result.Steps),
+						result.Usage.PromptTokens,
+						result.Usage.CompletionTokens,
+						result.Usage.TotalTokens,
+						costStr,
+						elapsed,
+					)
+				} else {
+					fmt.Fprintf(os.Stderr, "\n[%d + %d = %d tokens%s | %s]\n",
+						result.Usage.PromptTokens,
+						result.Usage.CompletionTokens,
+						result.Usage.TotalTokens,
+						costStr,
+						elapsed,
+					)
+				}
 			}
 
 			return nil

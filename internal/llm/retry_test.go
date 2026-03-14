@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"testing"
 	"time"
 
@@ -267,6 +268,17 @@ func TestParseRetryAfter_Negative(t *testing.T) {
 	assert.Equal(t, time.Duration(0), ParseRetryAfter("-1"))
 }
 
+// mockNetError implements net.Error for testing.
+type mockNetError struct {
+	msg       string
+	timeout   bool
+	temporary bool
+}
+
+func (e *mockNetError) Error() string   { return e.msg }
+func (e *mockNetError) Timeout() bool   { return e.timeout }
+func (e *mockNetError) Temporary() bool { return e.temporary }
+
 func TestIsRetryable(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -280,6 +292,15 @@ func TestIsRetryable(t *testing.T) {
 		{"context too long", fmt.Errorf("wrap: %w", ErrContextTooLong), false},
 		{"stream aborted", fmt.Errorf("wrap: %w", ErrStreamAborted), false},
 		{"generic error", fmt.Errorf("something broke"), false},
+		// Network errors.
+		{"EOF", fmt.Errorf("provider: %w", io.EOF), true},
+		{"unexpected EOF", fmt.Errorf("read: %w", io.ErrUnexpectedEOF), true},
+		{"net timeout", fmt.Errorf("wrap: %w", &mockNetError{msg: "timeout", timeout: true}), true},
+		{"net temporary", fmt.Errorf("wrap: %w", &mockNetError{msg: "temp", temporary: true}), true},
+		{"net.OpError", fmt.Errorf("wrap: %w", &net.OpError{Op: "dial", Err: fmt.Errorf("refused")}), true},
+		{"connection reset string", fmt.Errorf("read tcp: connection reset by peer"), true},
+		{"connection refused string", fmt.Errorf("dial tcp: connection refused"), true},
+		{"i/o timeout string", fmt.Errorf("net/http: i/o timeout"), true},
 	}
 
 	for _, tt := range tests {
@@ -287,6 +308,60 @@ func TestIsRetryable(t *testing.T) {
 			assert.Equal(t, tt.expected, isRetryable(tt.err))
 		})
 	}
+}
+
+func TestRetryProvider_RetryOnConnectionReset(t *testing.T) {
+	inner := &mockRetryProvider{
+		name:  "test",
+		model: "m",
+		responses: []mockRetryResult{
+			{err: fmt.Errorf("provider: read tcp: connection reset by peer")},
+			{resp: &Response{Content: "recovered"}},
+		},
+	}
+
+	rp := NewRetryProvider(inner, RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond}, silentLogger)
+	resp, err := rp.Complete(context.Background(), Request{}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", resp.Content)
+	assert.Equal(t, 2, inner.callIdx)
+}
+
+func TestRetryProvider_RetryOnEOF(t *testing.T) {
+	inner := &mockRetryProvider{
+		name:  "test",
+		model: "m",
+		responses: []mockRetryResult{
+			{err: fmt.Errorf("provider: %w", io.EOF)},
+			{resp: &Response{Content: "recovered"}},
+		},
+	}
+
+	rp := NewRetryProvider(inner, RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond}, silentLogger)
+	resp, err := rp.Complete(context.Background(), Request{}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", resp.Content)
+	assert.Equal(t, 2, inner.callIdx)
+}
+
+func TestRetryProvider_RetryOnNetTimeout(t *testing.T) {
+	inner := &mockRetryProvider{
+		name:  "test",
+		model: "m",
+		responses: []mockRetryResult{
+			{err: fmt.Errorf("wrap: %w", &mockNetError{msg: "timeout", timeout: true})},
+			{resp: &Response{Content: "recovered"}},
+		},
+	}
+
+	rp := NewRetryProvider(inner, RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond}, silentLogger)
+	resp, err := rp.Complete(context.Background(), Request{}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", resp.Content)
+	assert.Equal(t, 2, inner.callIdx)
 }
 
 func TestRetryableError_Unwrap(t *testing.T) {

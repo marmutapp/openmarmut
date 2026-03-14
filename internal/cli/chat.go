@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -13,6 +14,70 @@ import (
 	"github.com/gajaai/opencode-go/internal/logger"
 	"github.com/spf13/cobra"
 )
+
+// slashAction is the result of processing a slash command.
+type slashAction int
+
+const (
+	slashNone    slashAction = iota // Not a slash command — send to agent.
+	slashHandled                    // Slash command handled locally, continue loop.
+	slashExit                       // /quit or /exit — stop the loop.
+)
+
+// chatState holds mutable state for the chat REPL, used by handleSlashCommand.
+type chatState struct {
+	ag           *agent.Agent
+	sessionUsage llm.Usage
+	model        string
+	out          io.Writer // Where to write command output (stderr in production).
+}
+
+// handleSlashCommand processes slash commands locally without calling the LLM.
+// Returns the action to take (none/handled/exit).
+func handleSlashCommand(line string, state *chatState) slashAction {
+	if !strings.HasPrefix(line, "/") {
+		return slashNone
+	}
+
+	switch line {
+	case "/quit", "/exit":
+		return slashExit
+	case "/clear":
+		state.ag.ClearHistory()
+		state.sessionUsage = llm.Usage{}
+		fmt.Fprintln(state.out, "History cleared.")
+		return slashHandled
+	case "/tools":
+		fmt.Fprintln(state.out, "Available tools:")
+		for _, t := range state.ag.Tools() {
+			fmt.Fprintf(state.out, "  %-20s %s\n", t.Def.Name, t.Def.Description)
+		}
+		return slashHandled
+	case "/cost":
+		costStr := llm.FormatCost(state.sessionUsage, state.model)
+		if costStr == "" {
+			costStr = "unknown (no pricing for model)"
+		}
+		fmt.Fprintf(state.out, "Session: %d prompt + %d completion = %d tokens | ~%s\n",
+			state.sessionUsage.PromptTokens,
+			state.sessionUsage.CompletionTokens,
+			state.sessionUsage.TotalTokens,
+			costStr,
+		)
+		return slashHandled
+	case "/help":
+		fmt.Fprintln(state.out, "Commands:")
+		fmt.Fprintln(state.out, "  /clear    Reset conversation history")
+		fmt.Fprintln(state.out, "  /tools    List available tools")
+		fmt.Fprintln(state.out, "  /cost     Show accumulated session cost")
+		fmt.Fprintln(state.out, "  /help     Show this help")
+		fmt.Fprintln(state.out, "  /quit     Exit chat")
+		return slashHandled
+	default:
+		fmt.Fprintf(state.out, "Unknown command: %s (type /help for commands)\n", line)
+		return slashHandled
+	}
+}
 
 func newChatCmd(runner *Runner) *cobra.Command {
 	return &cobra.Command{
@@ -69,8 +134,11 @@ func newChatCmd(runner *Runner) *cobra.Command {
 
 			ag := agent.New(provider, rt, log, opts...)
 
-			// Track cumulative session usage for /cost.
-			var sessionUsage llm.Usage
+			state := &chatState{
+				ag:    ag,
+				model: provider.Model(),
+				out:   os.Stderr,
+			}
 
 			fmt.Fprintf(os.Stderr, "Chat with %s (%s). Type /help for commands, /quit to exit.\n\n",
 				provider.Name(), provider.Model())
@@ -87,46 +155,13 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					continue
 				}
 
-				// Handle slash commands.
-				if strings.HasPrefix(line, "/") {
-					switch line {
-					case "/quit", "/exit":
-						return nil
-					case "/clear":
-						ag.ClearHistory()
-						sessionUsage = llm.Usage{}
-						fmt.Fprintln(os.Stderr, "History cleared.")
-						continue
-					case "/tools":
-						fmt.Fprintln(os.Stderr, "Available tools:")
-						for _, t := range ag.Tools() {
-							fmt.Fprintf(os.Stderr, "  %-20s %s\n", t.Def.Name, t.Def.Description)
-						}
-						continue
-					case "/cost":
-						costStr := llm.FormatCost(sessionUsage, provider.Model())
-						if costStr == "" {
-							costStr = "unknown (no pricing for model)"
-						}
-						fmt.Fprintf(os.Stderr, "Session: %d prompt + %d completion = %d tokens | ~%s\n",
-							sessionUsage.PromptTokens,
-							sessionUsage.CompletionTokens,
-							sessionUsage.TotalTokens,
-							costStr,
-						)
-						continue
-					case "/help":
-						fmt.Fprintln(os.Stderr, "Commands:")
-						fmt.Fprintln(os.Stderr, "  /clear    Reset conversation history")
-						fmt.Fprintln(os.Stderr, "  /tools    List available tools")
-						fmt.Fprintln(os.Stderr, "  /cost     Show accumulated session cost")
-						fmt.Fprintln(os.Stderr, "  /help     Show this help")
-						fmt.Fprintln(os.Stderr, "  /quit     Exit chat")
-						continue
-					default:
-						fmt.Fprintf(os.Stderr, "Unknown command: %s (type /help for commands)\n", line)
-						continue
-					}
+				// Handle slash commands locally — no LLM call.
+				action := handleSlashCommand(line, state)
+				switch action {
+				case slashExit:
+					return nil
+				case slashHandled:
+					continue
 				}
 
 				// Stream tokens as they arrive.
@@ -144,17 +179,34 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				fmt.Fprintln(os.Stdout)
 
 				// Accumulate session usage.
-				sessionUsage.PromptTokens += result.Usage.PromptTokens
-				sessionUsage.CompletionTokens += result.Usage.CompletionTokens
-				sessionUsage.TotalTokens += result.Usage.TotalTokens
+				state.sessionUsage.PromptTokens += result.Usage.PromptTokens
+				state.sessionUsage.CompletionTokens += result.Usage.CompletionTokens
+				state.sessionUsage.TotalTokens += result.Usage.TotalTokens
 
-				if len(result.Steps) > 0 {
+				{
 					costStr := llm.FormatCost(result.Usage, provider.Model())
 					if costStr != "" {
 						costStr = " | ~" + costStr
 					}
-					fmt.Fprintf(os.Stderr, "[%d tool calls | %d tokens%s]\n",
-						len(result.Steps), result.Usage.TotalTokens, costStr)
+					elapsed := fmt.Sprintf("%.1fs", result.Duration.Seconds())
+					if len(result.Steps) > 0 {
+						fmt.Fprintf(os.Stderr, "[%d tool calls | %d + %d = %d tokens%s | %s]\n",
+							len(result.Steps),
+							result.Usage.PromptTokens,
+							result.Usage.CompletionTokens,
+							result.Usage.TotalTokens,
+							costStr,
+							elapsed,
+						)
+					} else {
+						fmt.Fprintf(os.Stderr, "[%d + %d = %d tokens%s | %s]\n",
+							result.Usage.PromptTokens,
+							result.Usage.CompletionTokens,
+							result.Usage.TotalTokens,
+							costStr,
+							elapsed,
+						)
+					}
 				}
 				fmt.Fprintln(os.Stderr)
 			}
