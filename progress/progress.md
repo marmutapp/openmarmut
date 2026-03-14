@@ -114,7 +114,7 @@
 - [x] `internal/cli/ask.go` — Updated imports to register all 6 provider types
 
 ### Phase 7c: Polish
-- [ ] Context window management — token counting, history summarization
+- [ ] Context window management — token counting, history summarization (deferred to future phase)
 - [x] Retry logic — RetryProvider wrapper with exponential backoff (1s/2s/4s), max 3 retries, Retry-After support
 - [x] Cost tracking — EstimateCost/FormatCost with model price map, displayed in ask/chat CLI output
 
@@ -151,5 +151,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-14 | Phase 7a | Agent loop implemented: tools.go (6 tools → Runtime), agent.go (loop with max iterations, usage aggregation, history), 21 tests. CLI wired: ask uses agent loop with --no-tools flag, chat REPL added. | Phase 7a nearly complete, remaining: security.go
 2026-03-14 | Phase 7a+7b | Bug fixes: responses provider tool call serialization (call_id, empty assistant msg), endpoint URL path detection, streaming after tool calls. Tested end-to-end with Azure OpenAI gpt-5.1-codex-mini. Phase 7a+7b complete except security.go. | Start Phase 7c or security.go
 2026-03-14 | Phase 7a | Implemented security.go: RedactCredentials, DetectCredentialLeak, CollectCredentials. Wired into agent loop — args redacted before execution, execute_command blocked on credential leak, tool output redacted before sending to LLM. 30 tests (21 existing + 9 security). Phase 7a complete. | Start Phase 7c
+2026-03-14 | Phase 7c | Retry logic: RetryProvider wrapper (1s/2s/4s backoff, max 3 retries, Retry-After support), ErrServerError sentinel added to all 6 providers. 18 new retry tests. Cost tracking: EstimateCost/FormatCost with model price map (OpenAI/Anthropic/Gemini), prefix matching, 13 tests. Wired into ask/chat CLI. Context window management deferred to future phase. Phase 7c complete. | All phases done
 
 <!-- Claude: append a new line here after each working session -->
