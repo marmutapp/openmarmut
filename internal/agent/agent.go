@@ -57,6 +57,10 @@ type Step struct {
 	Error    string       // Non-empty if the tool failed.
 }
 
+// ToolCallCallback is called when the agent is about to execute a tool.
+// Useful for displaying tool calls inline in a REPL.
+type ToolCallCallback func(tc llm.ToolCall)
+
 // Agent orchestrates the observe→plan→act→verify loop.
 type Agent struct {
 	provider       llm.Provider
@@ -71,6 +75,7 @@ type Agent struct {
 	maxTokens      *int
 	credentialKeys []string
 	contextCfg     ContextConfig
+	onToolCall     ToolCallCallback
 }
 
 // Option configures the Agent.
@@ -104,6 +109,11 @@ func WithCredentialKeys(keys []string) Option {
 // WithContextConfig sets the context window management configuration.
 func WithContextConfig(cfg ContextConfig) Option {
 	return func(a *Agent) { a.contextCfg = cfg }
+}
+
+// WithToolCallCallback sets a callback invoked before each tool execution.
+func WithToolCallCallback(cb ToolCallCallback) Option {
+	return func(a *Agent) { a.onToolCall = cb }
 }
 
 // New creates an Agent with the given provider and runtime.
@@ -193,6 +203,10 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 
 			step := Step{ToolCall: tc}
 
+			if a.onToolCall != nil {
+				a.onToolCall(tc)
+			}
+
 			tool, ok := a.toolMap[tc.Name]
 			if !ok {
 				step.Error = fmt.Sprintf("unknown tool: %s", tc.Name)
@@ -236,4 +250,16 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 // History returns the current conversation history.
 func (a *Agent) History() []llm.Message {
 	return a.history
+}
+
+// ClearHistory resets the conversation to just the system prompt.
+func (a *Agent) ClearHistory() {
+	a.history = []llm.Message{
+		{Role: llm.RoleSystem, Content: a.systemPrompt},
+	}
+}
+
+// Tools returns the agent's available tools.
+func (a *Agent) Tools() []Tool {
+	return a.tools
 }

@@ -682,6 +682,68 @@ func TestReadFileTool_Truncation(t *testing.T) {
 	assert.Less(t, len(output), len(bigContent))
 }
 
+func TestClearHistory(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "first", StopReason: "end"},
+			{Content: "after clear", StopReason: "end"},
+		},
+	}
+	rt := newMockRuntime("/project")
+	a := New(mp, rt, testLogger)
+
+	_, err := a.Run(context.Background(), "hello", nil)
+	require.NoError(t, err)
+	assert.Len(t, a.History(), 3) // system + user + assistant
+
+	a.ClearHistory()
+	assert.Len(t, a.History(), 1) // just system
+	assert.Equal(t, llm.RoleSystem, a.History()[0].Role)
+
+	_, err = a.Run(context.Background(), "after clear", nil)
+	require.NoError(t, err)
+	assert.Len(t, a.History(), 3) // system + user + assistant
+}
+
+func TestToolsAccessor(t *testing.T) {
+	mp := &mockProvider{name: "test", model: "m"}
+	rt := newMockRuntime("/project")
+	a := New(mp, rt, testLogger)
+
+	tools := a.Tools()
+	assert.Len(t, tools, 10)
+}
+
+func TestToolCallCallback(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("content")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "read_file", Arguments: `{"path":"x.txt"}`},
+				},
+			},
+			{Content: "done", StopReason: "end"},
+		},
+	}
+
+	var called []string
+	a := New(mp, rt, testLogger, WithToolCallCallback(func(tc llm.ToolCall) {
+		called = append(called, tc.Name)
+	}))
+
+	_, err := a.Run(context.Background(), "read x.txt", nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"read_file"}, called)
+}
+
 // --- New Tool Tests ---
 
 func TestReadFileLinesTool_HappyPath(t *testing.T) {
