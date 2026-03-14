@@ -174,6 +174,37 @@ func TestRun_TextStreaming(t *testing.T) {
 	assert.Equal(t, "Hello world", streamed.String())
 }
 
+func TestRun_StreamingAfterToolCalls(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("content")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "read_file", Arguments: `{"path":"x.txt"}`},
+				},
+			},
+			{Content: "The file says: content", StopReason: "end"},
+		},
+	}
+
+	var streamed strings.Builder
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "read x.txt", func(text string) error {
+		streamed.WriteString(text)
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "The file says: content", result.Response)
+	// The final text response must be streamed even after tool call iterations.
+	assert.Equal(t, "The file says: content", streamed.String())
+}
+
 func TestRun_SingleToolCall(t *testing.T) {
 	rt := newMockRuntime("/project")
 	rt.files["main.go"] = []byte("package main")

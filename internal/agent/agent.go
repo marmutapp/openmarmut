@@ -188,8 +188,8 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 			})
 		}
 
-		// Don't stream tool results — only stream the final text response.
-		stream = nil
+		// The stream callback is kept for the next iteration so the final
+		// text response is streamed to the caller.
 	}
 
 	return nil, ErrMaxIterations
