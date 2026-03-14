@@ -102,12 +102,15 @@
 - [ ] Runner extension — `RunWithLLM` lifecycle method
 
 ### Phase 7b: Remaining Wire Formats
-- [ ] `internal/llm/gemini/gemini.go` — Gemini wire format
-- [ ] `internal/llm/gemini/gemini_test.go`
-- [ ] `internal/llm/ollama/ollama.go` — Ollama wire format
-- [ ] `internal/llm/ollama/ollama_test.go`
-- [ ] `internal/llm/custom/custom.go` — Custom JSON template wire format
-- [ ] `internal/llm/custom/custom_test.go`
+- [x] `internal/llm/responses/responses.go` — OpenAI Responses API wire format (o3, o4-mini, Codex)
+- [x] `internal/llm/responses/responses_test.go` — 18 httptest-based unit tests
+- [x] `internal/llm/gemini/gemini.go` — Gemini wire format (streaming, functionCall/functionResponse)
+- [x] `internal/llm/gemini/gemini_test.go` — 15 httptest-based unit tests
+- [x] `internal/llm/ollama/ollama.go` — Ollama wire format (NDJSON streaming, tool calls)
+- [x] `internal/llm/ollama/ollama_test.go` — 15 httptest-based unit tests
+- [x] `internal/llm/custom/custom.go` — Custom provider (configurable endpoint, extra payload fields)
+- [x] `internal/llm/custom/custom_test.go` — 19 httptest-based unit tests
+- [x] `internal/cli/ask.go` — Updated imports to register all 6 provider types
 
 ### Phase 7c: Polish
 - [ ] Context window management — token counting, history summarization
@@ -143,5 +146,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-13 | Phase 7a | Rewrote LLM package: types.go + factory.go + credentials.go replacing llm.go. ProviderEntry/AuthConfig, RegisterType/NewProvider factory with defaults+credential resolution, ApplyAuth helper. Updated Anthropic to ProviderEntry. Implemented OpenAI wire format: SSE streaming, tool call accumulation, custom headers. 57 total tests (20 llm + 16 anthropic + 21 openai). | Continue Phase 7a: config additions, agent loop, CLI commands
 2026-03-13 | Phase 7a | LLM config wired into internal/config: LLMConfig struct (Providers, ActiveProvider, DefaultTemperature, DefaultMaxTokens, DefaultTimeout), FlagOverrides (--provider, --model, --temperature), env vars (OPENCODE_LLM_PROVIDER/MODEL/API_KEY), validation, ResolveActiveProvider with override chain. 29 new tests (42 total config tests). | Continue Phase 7a: agent loop, CLI commands
 2026-03-13 | Phase 7a | CLI commands: `opencode providers` (tabwriter, active marker), `opencode ask` (single-turn streaming via provider.Complete), root flags --provider/--model/--temperature wired to FlagOverrides. Smoke tested with multi-provider config. | Continue Phase 7a: agent loop, chat REPL
+2026-03-14 | Phase 7b | All 4 remaining wire formats implemented: openai-responses (18 tests), gemini (15 tests), ollama (15 tests), custom (19 tests). Updated ask.go imports to register all 6 provider types. 67 new tests across 4 packages. | Continue Phase 7a: agent loop, chat REPL
 
 <!-- Claude: append a new line here after each working session -->

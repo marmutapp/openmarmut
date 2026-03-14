@@ -12,7 +12,11 @@ import (
 
 	// Register LLM wire format providers.
 	_ "github.com/gajaai/opencode-go/internal/llm/anthropic"
+	_ "github.com/gajaai/opencode-go/internal/llm/custom"
+	_ "github.com/gajaai/opencode-go/internal/llm/gemini"
+	_ "github.com/gajaai/opencode-go/internal/llm/ollama"
 	_ "github.com/gajaai/opencode-go/internal/llm/openai"
+	_ "github.com/gajaai/opencode-go/internal/llm/responses"
 )
 
 func newAskCmd(runner *Runner) *cobra.Command {

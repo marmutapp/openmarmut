@@ -322,7 +322,7 @@ func TestValidate_LLM_InvalidType(t *testing.T) {
 	}
 	err := Validate(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "type must be openai/anthropic/gemini/ollama/custom")
+	assert.Contains(t, err.Error(), "type must be openai/openai-responses/anthropic/gemini/ollama/custom")
 }
 
 func TestValidate_LLM_EmptyModel(t *testing.T) {
