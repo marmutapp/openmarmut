@@ -19,6 +19,13 @@ type Config struct {
 	Log            LogConfig     `yaml:"log"`
 	DefaultTimeout time.Duration `yaml:"default_timeout"`
 	LLM            LLMConfig     `yaml:"llm"`
+	Agent          AgentConfig   `yaml:"agent"`
+}
+
+// AgentConfig holds agent-level settings for tool permissions.
+type AgentConfig struct {
+	AutoAllow []string `yaml:"auto_allow"` // Tool names that execute without confirmation.
+	Confirm   []string `yaml:"confirm"`    // Tool names that require user confirmation.
 }
 
 // LLMConfig holds all LLM provider configuration.
@@ -65,6 +72,7 @@ type FlagOverrides struct {
 	LLMProvider    *string  // --provider flag → overrides active_provider
 	LLMModel       *string  // --model flag → overrides active provider's model
 	LLMTemperature *float64 // --temperature flag
+	AutoApprove    bool     // --auto-approve flag → skip all tool confirmations
 }
 
 // defaults returns a Config with sensible default values.

@@ -18,6 +18,7 @@ func NewRootCmd() *cobra.Command {
 		llmProvider string
 		llmModel    string
 		llmTemp     float64
+		autoApprove bool
 	)
 
 	root := &cobra.Command{
@@ -50,6 +51,9 @@ func NewRootCmd() *cobra.Command {
 			if cmd.Flags().Changed("temperature") {
 				flags.LLMTemperature = &llmTemp
 			}
+			if cmd.Flags().Changed("auto-approve") {
+				flags.AutoApprove = autoApprove
+			}
 		},
 	}
 
@@ -62,6 +66,7 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVarP(&llmProvider, "provider", "p", "", "LLM provider name")
 	pf.StringVar(&llmModel, "model", "", "override model for the active LLM provider")
 	pf.Float64Var(&llmTemp, "temperature", 0, "sampling temperature (0.0–2.0)")
+	pf.BoolVar(&autoApprove, "auto-approve", false, "skip all tool confirmation prompts")
 
 	runner := NewRunner(flags)
 

@@ -101,6 +101,14 @@ func newAskCmd(runner *Runner) *cobra.Command {
 				}))
 			}
 
+			// In non-interactive ask mode, auto-approve all tools.
+			// There's no terminal to prompt the user.
+			pc := agent.NewPermissionChecker(
+				agent.BuildPermissions(cfg.Agent.AutoAllow, cfg.Agent.Confirm),
+				nil, // nil confirmFn = auto-approve
+			)
+			opts = append(opts, agent.WithPermissionChecker(pc))
+
 			ag := agent.New(provider, rt, log, opts...)
 			result, err := ag.Run(cmd.Context(), question, streamCB)
 			if err != nil {

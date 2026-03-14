@@ -79,6 +79,26 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 	}
 }
 
+// interactiveConfirm creates a ConfirmFunc that prompts the user on stderr/stdin.
+func interactiveConfirm(scanner *bufio.Scanner) agent.ConfirmFunc {
+	return func(tc llm.ToolCall, preview string) agent.ConfirmResult {
+		fmt.Fprintf(os.Stderr, "\n%s\n", preview)
+		fmt.Fprint(os.Stderr, "[allow] y/n/always? ")
+		if !scanner.Scan() {
+			return agent.ConfirmNo
+		}
+		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		switch answer {
+		case "y", "yes":
+			return agent.ConfirmYes
+		case "always", "a":
+			return agent.ConfirmAlways
+		default:
+			return agent.ConfirmNo
+		}
+	}
+}
+
 func newChatCmd(runner *Runner) *cobra.Command {
 	return &cobra.Command{
 		Use:   "chat",
@@ -109,6 +129,16 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			}
 			defer rt.Close(cmd.Context())
 
+			scanner := bufio.NewScanner(os.Stdin)
+
+			// Build permission checker.
+			perms := agent.BuildPermissions(cfg.Agent.AutoAllow, cfg.Agent.Confirm)
+			var confirmFn agent.ConfirmFunc
+			if !runner.flags.AutoApprove {
+				confirmFn = interactiveConfirm(scanner)
+			}
+			pc := agent.NewPermissionChecker(perms, confirmFn)
+
 			var opts []agent.Option
 			temp := resolveTemperature(cfg, entry)
 			if temp != nil {
@@ -132,6 +162,8 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				fmt.Fprintf(os.Stderr, "\033[2m→ %s(%s)\033[0m\n", tc.Name, argSummary)
 			}))
 
+			opts = append(opts, agent.WithPermissionChecker(pc))
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			state := &chatState{
@@ -143,7 +175,6 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			fmt.Fprintf(os.Stderr, "Chat with %s (%s). Type /help for commands, /quit to exit.\n\n",
 				provider.Name(), provider.Model())
 
-			scanner := bufio.NewScanner(os.Stdin)
 			for {
 				fmt.Fprint(os.Stderr, "you> ")
 				if !scanner.Scan() {

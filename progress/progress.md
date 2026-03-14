@@ -145,6 +145,20 @@
 - [x] `ToolCallCallback` agent option + `ClearHistory`/`Tools` methods
 - [x] 3 new agent tests (ClearHistory, ToolsAccessor, ToolCallCallback)
 
+## Phase 9: Permission & Confirmation System
+
+- [x] `internal/agent/permissions.go` — PermissionLevel (auto/confirm/deny), PermissionChecker, ConfirmFunc
+- [x] Default permissions: read-only tools auto, write/execute tools confirm
+- [x] ConfirmResult: Yes/No/Always (always upgrades to auto for session)
+- [x] FormatToolPreview — human-readable tool call display with content truncation
+- [x] BuildPermissions — construct permission map from config auto_allow/confirm lists
+- [x] Wired into agent.go — permission check before each tool execution
+- [x] AgentConfig in config.go — `agent.auto_allow` and `agent.confirm` YAML lists
+- [x] `--auto-approve` global flag to skip all confirmations
+- [x] chat.go — interactive confirmation UI (y/n/always prompt via stdin)
+- [x] ask.go — non-interactive mode auto-approves all tools
+- [x] 23 permission tests (unit + 3 integration tests in agent loop)
+
 ---
 
 ## Completion Criteria
@@ -180,6 +194,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-14 | Phase 7a | Implemented security.go: RedactCredentials, DetectCredentialLeak, CollectCredentials. Wired into agent loop — args redacted before execution, execute_command blocked on credential leak, tool output redacted before sending to LLM. 30 tests (21 existing + 9 security). Phase 7a complete. | Start Phase 7c
 2026-03-14 | Phase 7c | Retry logic: RetryProvider wrapper (1s/2s/4s backoff, max 3 retries, Retry-After support), ErrServerError sentinel added to all 6 providers. 18 new retry tests. Cost tracking: EstimateCost/FormatCost with model price map (OpenAI/Anthropic/Gemini), prefix matching, 13 tests. Wired into ask/chat CLI. Context window management deferred to future phase. Phase 7c complete. | All phases done
 
-2026-03-14 | Phase 8 | Advanced agent capabilities: 4 new tools (grep_files, find_files, patch_file, read_file_lines), context window management with auto-truncation, chat REPL improvements (streaming, inline tool calls, slash commands). 38 new tests across 3 commits. | All phases done
+2026-03-14 | Phase 8 | Advanced agent capabilities: 4 new tools (grep_files, find_files, patch_file, read_file_lines), context window management with auto-truncation, chat REPL improvements (streaming, inline tool calls, slash commands). 38 new tests across 3 commits. | Start Phase 9: permissions
+2026-03-14 | Phase 9 | Permission & confirmation system: PermissionChecker with auto/confirm/deny levels, interactive y/n/always UI in chat, FormatToolPreview, BuildPermissions from config, --auto-approve flag, AgentConfig in config. 23 new tests. | All phases done
 
 <!-- Claude: append a new line here after each working session -->

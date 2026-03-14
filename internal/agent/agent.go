@@ -78,6 +78,7 @@ type Agent struct {
 	credentialKeys []string
 	contextCfg     ContextConfig
 	onToolCall     ToolCallCallback
+	permChecker    *PermissionChecker
 }
 
 // Option configures the Agent.
@@ -116,6 +117,11 @@ func WithContextConfig(cfg ContextConfig) Option {
 // WithToolCallCallback sets a callback invoked before each tool execution.
 func WithToolCallCallback(cb ToolCallCallback) Option {
 	return func(a *Agent) { a.onToolCall = cb }
+}
+
+// WithPermissionChecker sets the permission checker for tool call authorization.
+func WithPermissionChecker(pc *PermissionChecker) Option {
+	return func(a *Agent) { a.permChecker = pc }
 }
 
 // New creates an Agent with the given provider and runtime.
@@ -209,6 +215,23 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 
 			if a.onToolCall != nil {
 				a.onToolCall(tc)
+			}
+
+			// Check permissions before executing.
+			if a.permChecker != nil {
+				allowed, denyMsg := a.permChecker.Check(tc)
+				if !allowed {
+					step.Error = denyMsg
+					step.Output = denyMsg
+					a.logger.Info("tool call denied by permission", "tool", tc.Name)
+					result.Steps = append(result.Steps, step)
+					a.history = append(a.history, llm.Message{
+						Role:       llm.RoleTool,
+						ToolCallID: tc.ID,
+						Content:    step.Output,
+					})
+					continue
+				}
 			}
 
 			tool, ok := a.toolMap[tc.Name]
