@@ -114,9 +114,36 @@
 - [x] `internal/cli/ask.go` — Updated imports to register all 6 provider types
 
 ### Phase 7c: Polish
-- [ ] Context window management — token counting, history summarization (deferred to future phase)
+- [x] Context window management — token counting, history summarization (implemented in Phase 8b)
 - [x] Retry logic — RetryProvider wrapper with exponential backoff (1s/2s/4s), max 3 retries, Retry-After support
 - [x] Cost tracking — EstimateCost/FormatCost with model price map, displayed in ask/chat CLI output
+
+## Phase 8: Advanced Agent Capabilities
+
+### Phase 8a: New Tools
+- [x] `grep_files` — regex search across files via `grep -rn`, include_glob, max_results
+- [x] `find_files` — find files by name pattern via `find`
+- [x] `patch_file` — surgical text replacements (str_replace style, unique match required)
+- [x] `read_file_lines` — read specific line range with line numbers
+- [x] Updated system prompt with all 10 tools
+- [x] 22 new tool tests (happy path, error cases, edge cases)
+
+### Phase 8b: Context Window Management
+- [x] `internal/agent/context.go` — token estimation (chars/4 heuristic)
+- [x] History truncation — auto-summarize when >80% of context window
+- [x] `ContextWindow` field added to `ProviderEntry` config (default 128000)
+- [x] Wired into agent loop — truncation before each LLM call
+- [x] 13 new context management tests
+
+### Phase 8c: Chat REPL Improvements
+- [x] Tool calls shown inline in dim text: `→ read_file(src/main.go)`
+- [x] Streaming output — tokens print as they arrive
+- [x] `/clear` command to reset conversation history
+- [x] `/tools` command to list available tools
+- [x] `/cost` command to show accumulated session cost
+- [x] `/help` command to show available commands
+- [x] `ToolCallCallback` agent option + `ClearHistory`/`Tools` methods
+- [x] 3 new agent tests (ClearHistory, ToolsAccessor, ToolCallCallback)
 
 ---
 
@@ -152,5 +179,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-14 | Phase 7a+7b | Bug fixes: responses provider tool call serialization (call_id, empty assistant msg), endpoint URL path detection, streaming after tool calls. Tested end-to-end with Azure OpenAI gpt-5.1-codex-mini. Phase 7a+7b complete except security.go. | Start Phase 7c or security.go
 2026-03-14 | Phase 7a | Implemented security.go: RedactCredentials, DetectCredentialLeak, CollectCredentials. Wired into agent loop — args redacted before execution, execute_command blocked on credential leak, tool output redacted before sending to LLM. 30 tests (21 existing + 9 security). Phase 7a complete. | Start Phase 7c
 2026-03-14 | Phase 7c | Retry logic: RetryProvider wrapper (1s/2s/4s backoff, max 3 retries, Retry-After support), ErrServerError sentinel added to all 6 providers. 18 new retry tests. Cost tracking: EstimateCost/FormatCost with model price map (OpenAI/Anthropic/Gemini), prefix matching, 13 tests. Wired into ask/chat CLI. Context window management deferred to future phase. Phase 7c complete. | All phases done
+
+2026-03-14 | Phase 8 | Advanced agent capabilities: 4 new tools (grep_files, find_files, patch_file, read_file_lines), context window management with auto-truncation, chat REPL improvements (streaming, inline tool calls, slash commands). 38 new tests across 3 commits. | All phases done
 
 <!-- Claude: append a new line here after each working session -->
