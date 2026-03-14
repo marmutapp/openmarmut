@@ -447,16 +447,18 @@ func TestComplete_ToolResultMessages(t *testing.T) {
 	require.NoError(t, json.Unmarshal(capturedBody, &parsed))
 
 	items := parsed["input"].([]any)
-	require.Len(t, items, 4) // user msg + assistant msg + function_call + function_call_output
+	// user msg + function_call + function_call_output (no empty assistant message)
+	require.Len(t, items, 3)
 
-	// Function call item.
-	fcItem := items[2].(map[string]any)
+	// Function call item (uses call_id, not id).
+	fcItem := items[1].(map[string]any)
 	assert.Equal(t, "function_call", fcItem["type"])
-	assert.Equal(t, "call_abc", fcItem["id"])
+	assert.Equal(t, "call_abc", fcItem["call_id"])
 	assert.Equal(t, "read_file", fcItem["name"])
+	assert.Equal(t, `{"path":"main.go"}`, fcItem["arguments"])
 
 	// Function call output item.
-	fcoItem := items[3].(map[string]any)
+	fcoItem := items[2].(map[string]any)
 	assert.Equal(t, "function_call_output", fcoItem["type"])
 	assert.Equal(t, "call_abc", fcoItem["call_id"])
 	assert.Equal(t, "package main", fcoItem["output"])
@@ -532,6 +534,150 @@ func TestComplete_FullURLUsedAsIs(t *testing.T) {
 		Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
 	}, nil)
 	require.NoError(t, err)
+}
+
+// --- Multi-Turn Agent Flow ---
+
+func TestComplete_MultiTurnAgentFlow(t *testing.T) {
+	// Simulates the agent loop: turn 1 returns a tool call, turn 2 receives
+	// the tool result and returns a text response. Verifies the request body
+	// on the second turn has the correct input structure.
+	var callCount int
+	var secondBody json.RawMessage
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		if callCount == 1 {
+			// Turn 1: return a tool call.
+			fmt.Fprint(w, sseEvents(
+				`{"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_xyz","name":"read_file"}}`,
+				`{"type":"response.function_call_arguments.delta","delta":"{\"path\":\"test.txt\"}"}`,
+				`{"type":"response.completed","response":{"id":"resp_1","output":[],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`,
+			))
+		} else {
+			// Turn 2: capture the body, return text.
+			body, _ := io.ReadAll(r.Body)
+			secondBody = body
+			fmt.Fprint(w, sseEvents(
+				`{"type":"response.output_text.delta","delta":"File contains: hello"}`,
+				`{"type":"response.completed","response":{"id":"resp_2","output":[],"usage":{"input_tokens":20,"output_tokens":10,"total_tokens":30}}}`,
+			))
+		}
+	}))
+	defer srv.Close()
+
+	p := testProvider(t, srv.URL)
+
+	// Turn 1: user message → tool call.
+	resp1, err := p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: "You are helpful."},
+			{Role: llm.RoleUser, Content: "read test.txt"},
+		},
+		Tools: []llm.ToolDef{{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters:  map[string]any{"type": "object"},
+		}},
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, resp1.ToolCalls, 1)
+	assert.Equal(t, "call_xyz", resp1.ToolCalls[0].ID)
+
+	// Turn 2: send tool result back.
+	resp2, err := p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: "You are helpful."},
+			{Role: llm.RoleUser, Content: "read test.txt"},
+			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
+				{ID: "call_xyz", Name: "read_file", Arguments: `{"path":"test.txt"}`},
+			}},
+			{Role: llm.RoleTool, ToolCallID: "call_xyz", Content: "hello world"},
+		},
+		Tools: []llm.ToolDef{{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters:  map[string]any{"type": "object"},
+		}},
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "File contains: hello", resp2.Content)
+
+	// Verify the second request body structure.
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(secondBody, &parsed))
+
+	assert.Equal(t, "You are helpful.", parsed["instructions"])
+
+	items := parsed["input"].([]any)
+	// user message + function_call + function_call_output (no empty assistant message)
+	require.Len(t, items, 3)
+
+	userItem := items[0].(map[string]any)
+	assert.Equal(t, "message", userItem["type"])
+	assert.Equal(t, "user", userItem["role"])
+	assert.Equal(t, "read test.txt", userItem["content"])
+
+	fcItem := items[1].(map[string]any)
+	assert.Equal(t, "function_call", fcItem["type"])
+	assert.Equal(t, "call_xyz", fcItem["call_id"])
+	assert.Equal(t, "read_file", fcItem["name"])
+	assert.Equal(t, `{"path":"test.txt"}`, fcItem["arguments"])
+
+	fcoItem := items[2].(map[string]any)
+	assert.Equal(t, "function_call_output", fcoItem["type"])
+	assert.Equal(t, "call_xyz", fcoItem["call_id"])
+	assert.Equal(t, "hello world", fcoItem["output"])
+}
+
+// --- Assistant Message With Text And Tool Calls ---
+
+func TestComplete_AssistantTextAndToolCalls(t *testing.T) {
+	// When an assistant message has both text content AND tool calls,
+	// we should emit both the message item and the function_call items.
+	var capturedBody json.RawMessage
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = body
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseEvents(
+			`{"type":"response.output_text.delta","delta":"done"}`,
+			`{"type":"response.completed","response":{"id":"r","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		))
+	}))
+	defer srv.Close()
+
+	p := testProvider(t, srv.URL)
+	_, err := p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: "read file"},
+			{Role: llm.RoleAssistant, Content: "Let me read that for you.", ToolCalls: []llm.ToolCall{
+				{ID: "call_1", Name: "read_file", Arguments: `{"path":"x.go"}`},
+			}},
+			{Role: llm.RoleTool, ToolCallID: "call_1", Content: "package x"},
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &parsed))
+
+	items := parsed["input"].([]any)
+	// user msg + assistant msg (with text) + function_call + function_call_output
+	require.Len(t, items, 4)
+
+	assistantItem := items[1].(map[string]any)
+	assert.Equal(t, "message", assistantItem["type"])
+	assert.Equal(t, "assistant", assistantItem["role"])
+	assert.Equal(t, "Let me read that for you.", assistantItem["content"])
+
+	fcItem := items[2].(map[string]any)
+	assert.Equal(t, "function_call", fcItem["type"])
+	assert.Equal(t, "call_1", fcItem["call_id"])
 }
 
 // --- Registration ---

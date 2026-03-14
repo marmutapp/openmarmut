@@ -173,15 +173,19 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			})
 
 		case llm.RoleAssistant:
-			items = append(items, inputItem{
-				Type:    "message",
-				Role:    "assistant",
-				Content: msg.Content,
-			})
+			// Only emit a message item if there's actual text content.
+			// The Responses API rejects empty content on message items.
+			if msg.Content != "" {
+				items = append(items, inputItem{
+					Type:    "message",
+					Role:    "assistant",
+					Content: msg.Content,
+				})
+			}
 			for _, tc := range msg.ToolCalls {
 				items = append(items, inputItem{
 					Type:      "function_call",
-					ID:        tc.ID,
+					CallID:    tc.ID,
 					Name:      tc.Name,
 					Arguments: tc.Arguments,
 				})
