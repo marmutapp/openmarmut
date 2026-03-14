@@ -648,18 +648,22 @@ func TestRun_ToolsIncludedInRequest(t *testing.T) {
 
 	require.Len(t, mp.requests, 1)
 	tools := mp.requests[0].Tools
-	assert.Len(t, tools, 6)
+	assert.Len(t, tools, 10)
 
 	toolNames := make(map[string]bool)
 	for _, t := range tools {
 		toolNames[t.Name] = true
 	}
 	assert.True(t, toolNames["read_file"])
+	assert.True(t, toolNames["read_file_lines"])
 	assert.True(t, toolNames["write_file"])
+	assert.True(t, toolNames["patch_file"])
 	assert.True(t, toolNames["delete_file"])
 	assert.True(t, toolNames["list_dir"])
 	assert.True(t, toolNames["mkdir"])
 	assert.True(t, toolNames["execute_command"])
+	assert.True(t, toolNames["grep_files"])
+	assert.True(t, toolNames["find_files"])
 }
 
 // --- Tool Tests (unit level) ---
@@ -676,6 +680,230 @@ func TestReadFileTool_Truncation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, output, "[truncated")
 	assert.Less(t, len(output), len(bigContent))
+}
+
+// --- New Tool Tests ---
+
+func TestReadFileLinesTool_HappyPath(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["lines.txt"] = []byte("line1\nline2\nline3\nline4\nline5")
+
+	tool := readFileLinesTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"path":"lines.txt","start_line":2,"end_line":4}`))
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "2\tline2")
+	assert.Contains(t, output, "3\tline3")
+	assert.Contains(t, output, "4\tline4")
+	assert.NotContains(t, output, "line1")
+	assert.NotContains(t, output, "line5")
+}
+
+func TestReadFileLinesTool_ClampToEnd(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["short.txt"] = []byte("a\nb\nc")
+
+	tool := readFileLinesTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"path":"short.txt","start_line":2,"end_line":100}`))
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "2\tb")
+	assert.Contains(t, output, "3\tc")
+}
+
+func TestReadFileLinesTool_InvalidRange(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("hello")
+
+	tool := readFileLinesTool()
+	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"path":"x.txt","start_line":5,"end_line":2}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "end_line")
+}
+
+func TestReadFileLinesTool_StartBeyondFile(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("one\ntwo")
+
+	tool := readFileLinesTool()
+	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"path":"x.txt","start_line":10,"end_line":20}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds file length")
+}
+
+func TestPatchFileTool_HappyPath(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["main.go"] = []byte("package main\n\nfunc hello() {}\n")
+
+	tool := patchFileTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{
+		"path": "main.go",
+		"edits": [{"old_text": "func hello() {}", "new_text": "func hello() {\n\tfmt.Println(\"hi\")\n}"}]
+	}`))
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "applied 1 edit(s)")
+	assert.Contains(t, string(rt.files["main.go"]), "fmt.Println")
+}
+
+func TestPatchFileTool_MultipleEdits(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["cfg.yaml"] = []byte("debug: false\nport: 8080\n")
+
+	tool := patchFileTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{
+		"path": "cfg.yaml",
+		"edits": [
+			{"old_text": "debug: false", "new_text": "debug: true"},
+			{"old_text": "port: 8080", "new_text": "port: 9090"}
+		]
+	}`))
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "applied 2 edit(s)")
+	content := string(rt.files["cfg.yaml"])
+	assert.Contains(t, content, "debug: true")
+	assert.Contains(t, content, "port: 9090")
+}
+
+func TestPatchFileTool_OldTextNotFound(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("hello")
+
+	tool := patchFileTool()
+	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{
+		"path": "x.txt",
+		"edits": [{"old_text": "goodbye", "new_text": "hi"}]
+	}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestPatchFileTool_AmbiguousMatch(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("foo bar foo baz foo")
+
+	tool := patchFileTool()
+	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{
+		"path": "x.txt",
+		"edits": [{"old_text": "foo", "new_text": "qux"}]
+	}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "matches 3 times")
+}
+
+func TestPatchFileTool_NoEdits(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("hello")
+
+	tool := patchFileTool()
+	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"path":"x.txt","edits":[]}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no edits")
+}
+
+func TestGrepFilesTool_HappyPath(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		return &runtime.ExecResult{
+			Stdout:   "src/main.go:10:func main() {\nsrc/main.go:15:func helper() {\n",
+			ExitCode: 0,
+		}, nil
+	}
+
+	tool := grepFilesTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"func.*\\(","path":"src","include_glob":"*.go"}`))
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "main.go:10")
+	assert.Contains(t, output, "func main()")
+}
+
+func TestGrepFilesTool_NoMatches(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		return &runtime.ExecResult{Stdout: "", ExitCode: 1}, nil
+	}
+
+	tool := grepFilesTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"nonexistent"}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, "no matches found", output)
+}
+
+func TestGrepFilesTool_GrepError(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		return &runtime.ExecResult{Stderr: "invalid regex", ExitCode: 2}, nil
+	}
+
+	tool := grepFilesTool()
+	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"[invalid"}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "grep error")
+}
+
+func TestGrepFilesTool_DefaultPath(t *testing.T) {
+	rt := newMockRuntime("/project")
+	var capturedCmd string
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		capturedCmd = command
+		return &runtime.ExecResult{Stdout: "", ExitCode: 1}, nil
+	}
+
+	tool := grepFilesTool()
+	_, _ = tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"test"}`))
+	assert.Contains(t, capturedCmd, "'.'")
+}
+
+func TestFindFilesTool_HappyPath(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		return &runtime.ExecResult{
+			Stdout:   "src/main.go\nsrc/util.go\n",
+			ExitCode: 0,
+		}, nil
+	}
+
+	tool := findFilesTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"*.go","path":"src"}`))
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "src/main.go")
+	assert.Contains(t, output, "src/util.go")
+}
+
+func TestFindFilesTool_NoResults(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		return &runtime.ExecResult{Stdout: "", ExitCode: 0}, nil
+	}
+
+	tool := findFilesTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"*.xyz"}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, "no files found", output)
+}
+
+func TestFindFilesTool_DefaultPath(t *testing.T) {
+	rt := newMockRuntime("/project")
+	var capturedCmd string
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		capturedCmd = command
+		return &runtime.ExecResult{Stdout: "", ExitCode: 0}, nil
+	}
+
+	tool := findFilesTool()
+	_, _ = tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"*.go"}`))
+	assert.Contains(t, capturedCmd, "'.'")
+}
+
+func TestShellQuote(t *testing.T) {
+	assert.Equal(t, "'hello'", shellQuote("hello"))
+	assert.Equal(t, "'it'\\''s'", shellQuote("it's"))
+	assert.Equal(t, "'a b c'", shellQuote("a b c"))
 }
 
 func TestExecTool_WithWorkdir(t *testing.T) {
