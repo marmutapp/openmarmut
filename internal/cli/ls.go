@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -27,15 +27,18 @@ func newLsCmd(runner *Runner) *cobra.Command {
 					return err
 				}
 
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				headers := []string{"PERM", "SIZE", "NAME"}
+				var rows [][]string
+
 				for _, e := range entries {
-					kind := "-"
-					if e.IsDir {
-						kind = "d"
-					}
-					fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", kind, e.Perm, e.Size, e.Name)
+					perm := ui.FormatPermission(e.Perm.String())
+					size := ui.HumanizeBytes(e.Size)
+					name := ui.FormatDirEntry(e.Name, e.IsDir)
+					rows = append(rows, []string{perm, size, name})
 				}
-				return w.Flush()
+
+				fmt.Fprintln(os.Stdout, ui.RenderTable(headers, rows, -1))
+				return nil
 			})
 		},
 	}

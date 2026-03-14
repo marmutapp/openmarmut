@@ -9,6 +9,7 @@ import (
 	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/ui"
 	"github.com/spf13/cobra"
 
 	// Register LLM wire format providers.
@@ -48,7 +49,16 @@ func newAskCmd(runner *Runner) *cobra.Command {
 
 			question := strings.Join(args, " ")
 
+			// Spinner while waiting for first token.
+			spinner := ui.NewSpinner(os.Stderr, "Thinking...")
+			spinner.Start()
+			firstToken := true
+
 			streamCB := func(text string) error {
+				if firstToken {
+					spinner.Stop()
+					firstToken = false
+				}
 				_, writeErr := fmt.Fprint(os.Stdout, text)
 				return writeErr
 			}
@@ -70,6 +80,7 @@ func newAskCmd(runner *Runner) *cobra.Command {
 				}
 
 				_, err = provider.Complete(cmd.Context(), req, streamCB)
+				spinner.Stop()
 				if err != nil {
 					return fmt.Errorf("ask: %w", err)
 				}
@@ -80,6 +91,7 @@ func newAskCmd(runner *Runner) *cobra.Command {
 			// Agent loop with tools — needs a runtime.
 			rt, err := initRuntime(cmd.Context(), cfg, log)
 			if err != nil {
+				spinner.Stop()
 				return fmt.Errorf("ask: %w", err)
 			}
 			defer rt.Close(cmd.Context())
@@ -102,46 +114,31 @@ func newAskCmd(runner *Runner) *cobra.Command {
 			}
 
 			// In non-interactive ask mode, auto-approve all tools.
-			// There's no terminal to prompt the user.
 			pc := agent.NewPermissionChecker(
 				agent.BuildPermissions(cfg.Agent.AutoAllow, cfg.Agent.Confirm),
-				nil, // nil confirmFn = auto-approve
+				nil,
 			)
 			opts = append(opts, agent.WithPermissionChecker(pc))
 
 			ag := agent.New(provider, rt, log, opts...)
 			result, err := ag.Run(cmd.Context(), question, streamCB)
+			spinner.Stop()
 			if err != nil {
 				return fmt.Errorf("ask: %w", err)
 			}
 
 			fmt.Fprintln(os.Stdout)
 
-			{
-				costStr := llm.FormatCost(result.Usage, provider.Model())
-				if costStr != "" {
-					costStr = " | ~" + costStr
-				}
-				elapsed := fmt.Sprintf("%.1fs", result.Duration.Seconds())
-				if len(result.Steps) > 0 {
-					fmt.Fprintf(os.Stderr, "\n[%d tool calls | %d + %d = %d tokens%s | %s]\n",
-						len(result.Steps),
-						result.Usage.PromptTokens,
-						result.Usage.CompletionTokens,
-						result.Usage.TotalTokens,
-						costStr,
-						elapsed,
-					)
-				} else {
-					fmt.Fprintf(os.Stderr, "\n[%d + %d = %d tokens%s | %s]\n",
-						result.Usage.PromptTokens,
-						result.Usage.CompletionTokens,
-						result.Usage.TotalTokens,
-						costStr,
-						elapsed,
-					)
-				}
-			}
+			// Styled summary line.
+			costStr := llm.FormatCost(result.Usage, provider.Model())
+			summary := ui.FormatSummary(
+				len(result.Steps),
+				result.Usage.PromptTokens,
+				result.Usage.CompletionTokens,
+				costStr,
+				result.Duration,
+			)
+			fmt.Fprintln(os.Stderr, "\n"+summary)
 
 			return nil
 		},

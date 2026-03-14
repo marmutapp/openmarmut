@@ -2,7 +2,7 @@
 
 **Project:** OpenMarmut-Go  
 **Started:** 2026-03-13  
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-03-15
 
 ---
 
@@ -187,6 +187,17 @@
 - [x] New style helpers: RenderWelcomeBanner, RenderConfirmBox, RenderMarkdown
 - [x] 25 new tests (styles_test.go + chat_test.go), all 17 packages pass
 
+### Phase 10.4: CLI Commands Styled Output
+- [x] `ask.go` — spinner while waiting for LLM, FormatSummary for cost/tokens/duration
+- [x] `providers.go` — styled table with ★ active marker, color-coded provider types, truncated endpoints
+- [x] `ls.go` — styled table with colorized permissions (r/w/x), HumanizeBytes, FormatDirEntry
+- [x] `info.go` — styled RenderBox with Runtime/Target/Provider/Model, Docker-specific fields
+- [x] `read.go` — syntax highlighting for known extensions (.go, .py, .js, .ts, .yaml, .json, .md, .sh) via glamour
+- [x] `errors.go` — styledError + errorHint pattern matching (6 common error patterns)
+- [x] `cmd/openmarmut/main.go` — uses ui.FormatError for top-level error display
+- [x] New style helpers: FormatHint, FormatProviderType, FormatPermission, FormatDirEntry, RenderCodeBlock, TruncateEnd
+- [x] All 17 packages pass
+
 ---
 
 ## Completion Criteria
@@ -227,6 +238,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 
 2026-03-15 | Phase 10.1 | Renamed project from OpenCode to OpenMarmut: go.mod module path, all imports, cmd/opencode→cmd/openmarmut, CLI root command, env var prefix OPENCODE_→OPENMARMUT_, config file .opencode.yaml→.openmarmut.yaml, all docs/specs/progress/rules. All 16 packages pass. | Phase 10.2: UI style system
 2026-03-15 | Phase 10.2 | UI style system: internal/ui package with tty.go (TTY/NO_COLOR detection, lipgloss profile sync), styles.go (6 colors, 15 named styles, 9 helpers), spinner.go (braille animation, goroutine-based). 23 tests. Dependencies: lipgloss + glamour. All 17 packages pass. | Wire UI into CLI commands
-2026-03-15 | Phase 10.3 | Chat REPL styled UI: welcome banner, UserPromptStyle, FormatToolCall, ConfirmBox permission prompts, FormatSummary, spinner, styled /help+/tools+/cost+/clear. New helpers: RenderWelcomeBanner, RenderConfirmBox, RenderMarkdown. 25 new tests. All 17 packages pass. | Continue Phase 10 polish
+2026-03-15 | Phase 10.3 | Chat REPL styled UI: welcome banner, UserPromptStyle, FormatToolCall, ConfirmBox permission prompts, FormatSummary, spinner, styled /help+/tools+/cost+/clear. New helpers: RenderWelcomeBanner, RenderConfirmBox, RenderMarkdown. 25 new tests. All 17 packages pass. | Phase 10.4: remaining CLI commands
+2026-03-15 | Phase 10.4 | All CLI commands styled: ask (spinner+summary), providers (color-coded table), ls (permissions+HumanizeBytes), info (RenderBox), read (syntax highlighting), errors.go (hints). Phase 10 complete. | Done
 
 <!-- Claude: append a new line here after each working session -->

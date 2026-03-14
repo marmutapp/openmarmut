@@ -241,6 +241,90 @@ func RenderMarkdown(md string) string {
 	return strings.TrimRight(out, "\n")
 }
 
+// FormatHint returns a dim hint line like "  Hint: msg".
+func FormatHint(msg string) string {
+	return styled(DimStyle, "  Hint: "+msg)
+}
+
+// FormatProviderType returns the provider type name color-coded by category.
+func FormatProviderType(typeName string) string {
+	if !ColorEnabled() {
+		return typeName
+	}
+	switch typeName {
+	case "openai":
+		return SuccessStyle.Render(typeName)
+	case "anthropic":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#E040FB")).Render(typeName)
+	case "openai-responses":
+		return lipgloss.NewStyle().Foreground(ColorSecond).Render(typeName)
+	case "gemini":
+		return WarningStyle.Render(typeName)
+	case "ollama":
+		return lipgloss.NewStyle().Foreground(ColorBrand).Render(typeName)
+	default:
+		return DimStyle.Render(typeName)
+	}
+}
+
+// FormatPermission colorizes a file permission string character by character.
+// r=green, w=yellow, x=red, -=gray.
+func FormatPermission(perm string) string {
+	if !ColorEnabled() {
+		return perm
+	}
+	var sb strings.Builder
+	for _, ch := range perm {
+		switch ch {
+		case 'r':
+			sb.WriteString(SuccessStyle.Render("r"))
+		case 'w':
+			sb.WriteString(WarningStyle.Render("w"))
+		case 'x':
+			sb.WriteString(ErrorStyle.Render("x"))
+		case 'd':
+			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(ColorSecond).Render("d"))
+		default:
+			sb.WriteString(DimStyle.Render(string(ch)))
+		}
+	}
+	return sb.String()
+}
+
+// FormatDirEntry formats a directory entry name. Directories are bold blue with trailing /.
+func FormatDirEntry(name string, isDir bool) string {
+	if isDir {
+		dirName := name + "/"
+		if !ColorEnabled() {
+			return dirName
+		}
+		return lipgloss.NewStyle().Bold(true).Foreground(ColorSecond).Render(dirName)
+	}
+	return name
+}
+
+// RenderCodeBlock wraps code in a glamour-rendered markdown code block.
+// lang is the language hint (e.g., "go", "python"); empty means no hint.
+// Falls back to plain text if glamour is unavailable.
+func RenderCodeBlock(code, lang string) string {
+	if !ColorEnabled() {
+		return code
+	}
+	md := fmt.Sprintf("```%s\n%s\n```", lang, code)
+	return RenderMarkdown(md)
+}
+
+// TruncateEnd truncates s to max characters, adding "..." if truncated.
+func TruncateEnd(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
+}
+
 // HumanizeBytes formats a byte count into a human-readable string.
 func HumanizeBytes(bytes int64) string {
 	const (

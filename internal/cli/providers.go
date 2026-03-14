@@ -3,11 +3,11 @@ package cli
 import (
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -23,30 +23,38 @@ func newProvidersCmd(runner *Runner) *cobra.Command {
 			}
 
 			if len(cfg.LLM.Providers) == 0 {
-				fmt.Fprintln(os.Stderr, "No LLM providers configured. Add a providers section to .openmarmut.yaml.")
+				fmt.Fprintln(os.Stderr, ui.FormatWarning("No LLM providers configured."))
+				fmt.Fprintln(os.Stderr, ui.FormatHint("Add a providers section to .openmarmut.yaml"))
 				return nil
 			}
 
 			log := logger.New(cfg.Log)
 			activeName := cfg.LLM.ActiveProviderName()
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintf(w, "  NAME\tTYPE\tMODEL\tENDPOINT\n")
+			headers := []string{"", "NAME", "TYPE", "MODEL", "ENDPOINT"}
+			var rows [][]string
+			activeRow := -1
 
-			for _, p := range cfg.LLM.Providers {
+			for i, p := range cfg.LLM.Providers {
 				marker := " "
 				if p.Name == activeName {
-					marker = "*"
+					marker = "★"
+					activeRow = i
 				}
 				endpoint := p.EndpointURL
 				if endpoint == "" {
 					endpoint = llm.DefaultEndpointURL(p.Type)
 				}
-				fmt.Fprintf(w, "%s %s\t%s\t%s\t%s\n", marker, p.Name, p.Type, p.ModelName, endpoint)
-			}
-			w.Flush()
+				endpoint = ui.TruncateEnd(endpoint, 45)
 
-			_ = log // logger available for future use
+				typeName := ui.FormatProviderType(p.Type)
+
+				rows = append(rows, []string{marker, p.Name, typeName, p.ModelName, endpoint})
+			}
+
+			fmt.Fprintln(os.Stdout, ui.RenderTable(headers, rows, activeRow))
+
+			_ = log
 			return nil
 		},
 	}
