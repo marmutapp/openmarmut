@@ -1,0 +1,666 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/gajaai/opencode-go/internal/llm"
+	"github.com/gajaai/opencode-go/internal/runtime"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+// --- Mock Provider ---
+
+// mockProvider returns scripted responses in order.
+type mockProvider struct {
+	name      string
+	model     string
+	responses []*llm.Response
+	requests  []llm.Request // captured requests
+	callIdx   int
+}
+
+func (m *mockProvider) Name() string  { return m.name }
+func (m *mockProvider) Model() string { return m.model }
+
+func (m *mockProvider) Complete(_ context.Context, req llm.Request, cb llm.StreamCallback) (*llm.Response, error) {
+	m.requests = append(m.requests, req)
+	if m.callIdx >= len(m.responses) {
+		return nil, fmt.Errorf("mock: no more responses (call %d)", m.callIdx)
+	}
+	resp := m.responses[m.callIdx]
+	m.callIdx++
+
+	if cb != nil && resp.Content != "" {
+		if err := cb(resp.Content); err != nil {
+			return nil, fmt.Errorf("mock: %w: %w", llm.ErrStreamAborted, err)
+		}
+	}
+
+	return resp, nil
+}
+
+// --- Mock Runtime ---
+
+// mockRuntime is a minimal in-memory runtime for testing.
+type mockRuntime struct {
+	targetDir string
+	files     map[string][]byte
+	dirs      map[string]bool
+	execFn    func(command string) (*runtime.ExecResult, error)
+}
+
+func newMockRuntime(targetDir string) *mockRuntime {
+	return &mockRuntime{
+		targetDir: targetDir,
+		files:     make(map[string][]byte),
+		dirs:      map[string]bool{".": true},
+	}
+}
+
+func (m *mockRuntime) Init(context.Context) error  { return nil }
+func (m *mockRuntime) Close(context.Context) error { return nil }
+func (m *mockRuntime) TargetDir() string           { return m.targetDir }
+
+func (m *mockRuntime) ReadFile(_ context.Context, relPath string) ([]byte, error) {
+	data, ok := m.files[relPath]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return data, nil
+}
+
+func (m *mockRuntime) WriteFile(_ context.Context, relPath string, data []byte, _ os.FileMode) error {
+	m.files[relPath] = data
+	return nil
+}
+
+func (m *mockRuntime) DeleteFile(_ context.Context, relPath string) error {
+	if _, ok := m.files[relPath]; !ok {
+		return os.ErrNotExist
+	}
+	delete(m.files, relPath)
+	return nil
+}
+
+func (m *mockRuntime) ListDir(_ context.Context, relPath string) ([]runtime.FileEntry, error) {
+	if !m.dirs[relPath] {
+		return nil, os.ErrNotExist
+	}
+	var entries []runtime.FileEntry
+	prefix := relPath
+	if prefix != "." {
+		prefix += "/"
+	} else {
+		prefix = ""
+	}
+	for path := range m.files {
+		if prefix == "" || strings.HasPrefix(path, prefix) {
+			name := strings.TrimPrefix(path, prefix)
+			if !strings.Contains(name, "/") {
+				entries = append(entries, runtime.FileEntry{
+					Name: name, Size: int64(len(m.files[path])),
+				})
+			}
+		}
+	}
+	return entries, nil
+}
+
+func (m *mockRuntime) MkDir(_ context.Context, relPath string, _ os.FileMode) error {
+	m.dirs[relPath] = true
+	return nil
+}
+
+func (m *mockRuntime) Exec(_ context.Context, command string, _ runtime.ExecOpts) (*runtime.ExecResult, error) {
+	if m.execFn != nil {
+		return m.execFn(command)
+	}
+	return &runtime.ExecResult{Stdout: "ok", ExitCode: 0}, nil
+}
+
+// --- Tests ---
+
+func TestRun_TextOnly(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "Hello!", StopReason: "end", Usage: llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
+		},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "hi", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Hello!", result.Response)
+	assert.Empty(t, result.Steps)
+	assert.Equal(t, 10, result.Usage.PromptTokens)
+	assert.Equal(t, 5, result.Usage.CompletionTokens)
+	assert.Equal(t, 15, result.Usage.TotalTokens)
+}
+
+func TestRun_TextStreaming(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "Hello world", StopReason: "end"},
+		},
+	}
+	rt := newMockRuntime("/project")
+
+	var streamed strings.Builder
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "hi", func(text string) error {
+		streamed.WriteString(text)
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Hello world", result.Response)
+	assert.Equal(t, "Hello world", streamed.String())
+}
+
+func TestRun_SingleToolCall(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["main.go"] = []byte("package main")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`},
+				},
+				Usage: llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+			},
+			{
+				Content:    "The file contains: package main",
+				StopReason: "end",
+				Usage:      llm.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
+			},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "read main.go", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "The file contains: package main", result.Response)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, "read_file", result.Steps[0].ToolCall.Name)
+	assert.Equal(t, "package main", result.Steps[0].Output)
+	assert.Empty(t, result.Steps[0].Error)
+
+	// Usage should be aggregated.
+	assert.Equal(t, 30, result.Usage.PromptTokens)
+	assert.Equal(t, 15, result.Usage.CompletionTokens)
+	assert.Equal(t, 45, result.Usage.TotalTokens)
+}
+
+func TestRun_MultipleToolCallsOneIteration(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["a.txt"] = []byte("aaa")
+	rt.files["b.txt"] = []byte("bbb")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "read_file", Arguments: `{"path":"a.txt"}`},
+					{ID: "call_2", Name: "read_file", Arguments: `{"path":"b.txt"}`},
+				},
+			},
+			{Content: "Both files read", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "read both files", nil)
+
+	require.NoError(t, err)
+	require.Len(t, result.Steps, 2)
+	assert.Equal(t, "aaa", result.Steps[0].Output)
+	assert.Equal(t, "bbb", result.Steps[1].Output)
+	assert.Equal(t, "Both files read", result.Response)
+}
+
+func TestRun_ToolError(t *testing.T) {
+	rt := newMockRuntime("/project")
+	// No files — read_file will return os.ErrNotExist.
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "read_file", Arguments: `{"path":"missing.go"}`},
+				},
+			},
+			{Content: "File not found, creating it.", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "read missing.go", nil)
+
+	require.NoError(t, err)
+	require.Len(t, result.Steps, 1)
+	assert.Contains(t, result.Steps[0].Error, "not exist")
+	assert.Contains(t, result.Steps[0].Output, "error:")
+}
+
+func TestRun_UnknownTool(t *testing.T) {
+	rt := newMockRuntime("/project")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "fly_to_moon", Arguments: `{}`},
+				},
+			},
+			{Content: "I can't do that.", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "go to moon", nil)
+
+	require.NoError(t, err)
+	require.Len(t, result.Steps, 1)
+	assert.Contains(t, result.Steps[0].Error, "unknown tool")
+}
+
+func TestRun_MaxIterations(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("x")
+
+	// Always return a tool call — never a text response.
+	var responses []*llm.Response
+	for i := 0; i < 5; i++ {
+		responses = append(responses, &llm.Response{
+			StopReason: "tool_use",
+			ToolCalls: []llm.ToolCall{
+				{ID: fmt.Sprintf("call_%d", i), Name: "read_file", Arguments: `{"path":"x.txt"}`},
+			},
+		})
+	}
+
+	mp := &mockProvider{name: "test", model: "m", responses: responses}
+	a := New(mp, rt, testLogger, WithMaxIterations(3))
+	_, err := a.Run(context.Background(), "loop forever", nil)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMaxIterations)
+}
+
+func TestRun_WriteFile(t *testing.T) {
+	rt := newMockRuntime("/project")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "write_file", Arguments: `{"path":"hello.txt","content":"hello world"}`},
+				},
+			},
+			{Content: "Created hello.txt", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "create hello.txt", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Created hello.txt", result.Response)
+	require.Len(t, result.Steps, 1)
+	assert.Contains(t, result.Steps[0].Output, "wrote 11 bytes")
+
+	// Verify file was written.
+	assert.Equal(t, []byte("hello world"), rt.files["hello.txt"])
+}
+
+func TestRun_ListDir(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["a.go"] = []byte("package a")
+	rt.files["b.go"] = []byte("package b")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "list_dir", Arguments: `{"path":"."}`},
+				},
+			},
+			{Content: "Found 2 files", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "list files", nil)
+
+	require.NoError(t, err)
+	require.Len(t, result.Steps, 1)
+
+	var entries []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result.Steps[0].Output), &entries))
+	assert.Len(t, entries, 2)
+}
+
+func TestRun_DeleteFile(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["temp.txt"] = []byte("temp")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "delete_file", Arguments: `{"path":"temp.txt"}`},
+				},
+			},
+			{Content: "Deleted", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "delete temp.txt", nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, result.Steps[0].Output, "deleted temp.txt")
+	_, exists := rt.files["temp.txt"]
+	assert.False(t, exists)
+}
+
+func TestRun_Mkdir(t *testing.T) {
+	rt := newMockRuntime("/project")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "mkdir", Arguments: `{"path":"src/pkg"}`},
+				},
+			},
+			{Content: "Created", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "create dir", nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, result.Steps[0].Output, "created directory src/pkg")
+	assert.True(t, rt.dirs["src/pkg"])
+}
+
+func TestRun_ExecCommand(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		return &runtime.ExecResult{
+			Stdout:   "PASS",
+			Stderr:   "",
+			ExitCode: 0,
+		}, nil
+	}
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "execute_command", Arguments: `{"command":"go test ./..."}`},
+				},
+			},
+			{Content: "Tests passed", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "run tests", nil)
+
+	require.NoError(t, err)
+	require.Len(t, result.Steps, 1)
+
+	var execOut map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result.Steps[0].Output), &execOut))
+	assert.Equal(t, "PASS", execOut["stdout"])
+	assert.Equal(t, float64(0), execOut["exit_code"])
+}
+
+func TestRun_HistoryMaintained(t *testing.T) {
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{Content: "First response", StopReason: "end"},
+			{Content: "Second response", StopReason: "end"},
+		},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger)
+
+	_, err := a.Run(context.Background(), "first", nil)
+	require.NoError(t, err)
+
+	_, err = a.Run(context.Background(), "second", nil)
+	require.NoError(t, err)
+
+	// History should have: system, user1, assistant1, user2, assistant2.
+	history := a.History()
+	assert.Len(t, history, 5)
+	assert.Equal(t, llm.RoleSystem, history[0].Role)
+	assert.Equal(t, llm.RoleUser, history[1].Role)
+	assert.Equal(t, "first", history[1].Content)
+	assert.Equal(t, llm.RoleAssistant, history[2].Role)
+	assert.Equal(t, llm.RoleUser, history[3].Role)
+	assert.Equal(t, "second", history[3].Content)
+	assert.Equal(t, llm.RoleAssistant, history[4].Role)
+
+	// Second request should include full history.
+	require.Len(t, mp.requests, 2)
+	assert.Len(t, mp.requests[1].Messages, 4) // system + user1 + assistant1 + user2
+}
+
+func TestRun_ToolResultSentBack(t *testing.T) {
+	rt := newMockRuntime("/project")
+	rt.files["x.txt"] = []byte("content")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "read_file", Arguments: `{"path":"x.txt"}`},
+				},
+			},
+			{Content: "Done", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	_, err := a.Run(context.Background(), "read x.txt", nil)
+	require.NoError(t, err)
+
+	// The second provider call should include the tool result.
+	require.Len(t, mp.requests, 2)
+	msgs := mp.requests[1].Messages
+	// system + user + assistant(tool_call) + tool_result
+	require.Len(t, msgs, 4)
+	assert.Equal(t, llm.RoleTool, msgs[3].Role)
+	assert.Equal(t, "call_1", msgs[3].ToolCallID)
+	assert.Equal(t, "content", msgs[3].Content)
+}
+
+func TestRun_MultiTurnToolUse(t *testing.T) {
+	rt := newMockRuntime("/project")
+
+	mp := &mockProvider{
+		name:  "test",
+		model: "test-model",
+		responses: []*llm.Response{
+			// Turn 1: list directory
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "list_dir", Arguments: `{"path":"."}`},
+				},
+			},
+			// Turn 2: write a file based on what was listed
+			{
+				StopReason: "tool_use",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_2", Name: "write_file", Arguments: `{"path":"new.txt","content":"new file"}`},
+				},
+			},
+			// Turn 3: final text response
+			{Content: "Created new.txt in empty project", StopReason: "end"},
+		},
+	}
+
+	a := New(mp, rt, testLogger)
+	result, err := a.Run(context.Background(), "add a file", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Created new.txt in empty project", result.Response)
+	require.Len(t, result.Steps, 2)
+	assert.Equal(t, "list_dir", result.Steps[0].ToolCall.Name)
+	assert.Equal(t, "write_file", result.Steps[1].ToolCall.Name)
+	assert.Equal(t, []byte("new file"), rt.files["new.txt"])
+}
+
+func TestRun_SystemPromptContainsTargetDir(t *testing.T) {
+	mp := &mockProvider{
+		name:      "test",
+		model:     "test-model",
+		responses: []*llm.Response{{Content: "ok", StopReason: "end"}},
+	}
+	rt := newMockRuntime("/my/project")
+
+	a := New(mp, rt, testLogger)
+	_, err := a.Run(context.Background(), "hi", nil)
+	require.NoError(t, err)
+
+	require.Len(t, mp.requests, 1)
+	sysMsg := mp.requests[0].Messages[0]
+	assert.Equal(t, llm.RoleSystem, sysMsg.Role)
+	assert.Contains(t, sysMsg.Content, "/my/project")
+}
+
+func TestRun_CustomSystemPrompt(t *testing.T) {
+	mp := &mockProvider{
+		name:      "test",
+		model:     "test-model",
+		responses: []*llm.Response{{Content: "ok", StopReason: "end"}},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger, WithSystemPrompt("Custom prompt"))
+	_, err := a.Run(context.Background(), "hi", nil)
+	require.NoError(t, err)
+
+	sysMsg := mp.requests[0].Messages[0]
+	assert.Equal(t, "Custom prompt", sysMsg.Content)
+}
+
+func TestRun_ToolsIncludedInRequest(t *testing.T) {
+	mp := &mockProvider{
+		name:      "test",
+		model:     "test-model",
+		responses: []*llm.Response{{Content: "ok", StopReason: "end"}},
+	}
+	rt := newMockRuntime("/project")
+
+	a := New(mp, rt, testLogger)
+	_, err := a.Run(context.Background(), "hi", nil)
+	require.NoError(t, err)
+
+	require.Len(t, mp.requests, 1)
+	tools := mp.requests[0].Tools
+	assert.Len(t, tools, 6)
+
+	toolNames := make(map[string]bool)
+	for _, t := range tools {
+		toolNames[t.Name] = true
+	}
+	assert.True(t, toolNames["read_file"])
+	assert.True(t, toolNames["write_file"])
+	assert.True(t, toolNames["delete_file"])
+	assert.True(t, toolNames["list_dir"])
+	assert.True(t, toolNames["mkdir"])
+	assert.True(t, toolNames["execute_command"])
+}
+
+// --- Tool Tests (unit level) ---
+
+func TestReadFileTool_Truncation(t *testing.T) {
+	rt := newMockRuntime("/project")
+	// Create a file larger than 100KB.
+	bigContent := strings.Repeat("x", 150*1024)
+	rt.files["big.txt"] = []byte(bigContent)
+
+	tool := readFileTool()
+	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"path":"big.txt"}`))
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "[truncated")
+	assert.Less(t, len(output), len(bigContent))
+}
+
+func TestExecTool_WithWorkdir(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub")
+	require.NoError(t, os.MkdirAll(subDir, 0755))
+
+	var capturedOpts runtime.ExecOpts
+	rt := newMockRuntime(dir)
+	rt.execFn = func(command string) (*runtime.ExecResult, error) {
+		return &runtime.ExecResult{Stdout: "ok"}, nil
+	}
+
+	// Override Exec to capture opts (the mock doesn't capture ExecOpts by default).
+	tool := execTool()
+	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"command":"ls","workdir":"sub"}`))
+	require.NoError(t, err)
+	_ = capturedOpts // The mock doesn't capture opts, but this tests the JSON parsing.
+}
