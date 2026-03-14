@@ -136,13 +136,26 @@ func interactiveConfirm(state *chatState) agent.ConfirmFunc {
 			state.spinner = nil
 		}
 
+		// RenderConfirmBox already includes the [y]es / [n]o / [a]lways footer.
+		// Print the box, then a "> " prompt on a new line for input.
 		fmt.Fprint(os.Stderr, ui.RenderConfirmBox(preview))
-		fmt.Fprint(os.Stderr, "\n[y]es / [n]o / [a]lways: ")
+		fmt.Fprint(os.Stderr, "\n> ")
 
-		if !state.scanner.Scan() {
-			return agent.ConfirmNo
+		// Read input, skipping stale empty lines that may be left in the
+		// scanner buffer from the main input loop (e.g. if the user pressed
+		// Enter twice or the kernel bundled extra newlines).
+		var answer string
+		for {
+			if !state.scanner.Scan() {
+				return agent.ConfirmNo
+			}
+			answer = strings.TrimSpace(strings.ToLower(state.scanner.Text()))
+			if answer != "" {
+				break
+			}
+			// Empty line — show prompt again and retry.
+			fmt.Fprint(os.Stderr, "> ")
 		}
-		answer := strings.TrimSpace(strings.ToLower(state.scanner.Text()))
 
 		// Restart spinner — agent continues working after user responds.
 		state.spinner = ui.NewSpinner(os.Stderr, "Working...")
@@ -151,7 +164,7 @@ func interactiveConfirm(state *chatState) agent.ConfirmFunc {
 		switch answer {
 		case "y", "yes":
 			return agent.ConfirmYes
-		case "always", "a":
+		case "a", "always":
 			return agent.ConfirmAlways
 		default:
 			return agent.ConfirmNo

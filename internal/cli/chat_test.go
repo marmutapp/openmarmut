@@ -279,7 +279,7 @@ func TestInteractiveConfirm_WaitsForInput(t *testing.T) {
 		{"no", "n\n", agent.ConfirmNo},
 		{"always", "always\n", agent.ConfirmAlways},
 		{"a shorthand", "a\n", agent.ConfirmAlways},
-		{"empty input denies", "\n", agent.ConfirmNo},
+		{"empty then EOF denies", "\n", agent.ConfirmNo},
 		{"garbage denies", "maybe\n", agent.ConfirmNo},
 	}
 
@@ -303,6 +303,46 @@ func TestInteractiveConfirm_WaitsForInput(t *testing.T) {
 
 			result := confirmFn(tc, "→ write_file(test.go)")
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestInteractiveConfirm_SkipsStaleNewlines(t *testing.T) {
+	// Simulates stale newlines in the scanner buffer before the real input.
+	// Without the empty-line-skip loop, the first empty line would hit the
+	// default case and return ConfirmNo, ignoring the user's actual "a" input.
+	tests := []struct {
+		name     string
+		input    string
+		expected agent.ConfirmResult
+	}{
+		{"one stale newline then a", "\na\n", agent.ConfirmAlways},
+		{"two stale newlines then yes", "\n\ny\n", agent.ConfirmYes},
+		{"three stale newlines then always", "\n\n\nalways\n", agent.ConfirmAlways},
+		{"stale newline then no", "\nn\n", agent.ConfirmNo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := strings.NewReader(tt.input)
+			scanner := bufio.NewScanner(r)
+
+			state := &chatState{
+				scanner: scanner,
+				out:     io.Discard,
+			}
+
+			confirmFn := interactiveConfirm(state)
+
+			tc := llm.ToolCall{
+				ID:        "call_1",
+				Name:      "write_file",
+				Arguments: `{"path":"test.go","content":"package main"}`,
+			}
+
+			result := confirmFn(tc, "→ write_file(test.go)")
+			assert.Equal(t, tt.expected, result,
+				"input %q should return %v after skipping stale newlines", tt.input, tt.expected)
 		})
 	}
 }
