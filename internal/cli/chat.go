@@ -12,6 +12,7 @@ import (
 	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +27,8 @@ const (
 
 // chatState holds mutable state for the chat REPL, used by handleSlashCommand.
 type chatState struct {
-	ag           *agent.Agent
+	ag          *agent.Agent
+	permChecker *agent.PermissionChecker
 	sessionUsage llm.Usage
 	model        string
 	out          io.Writer // Where to write command output (stderr in production).
@@ -45,45 +47,87 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 	case "/clear":
 		state.ag.ClearHistory()
 		state.sessionUsage = llm.Usage{}
-		fmt.Fprintln(state.out, "History cleared.")
+		fmt.Fprintln(state.out, ui.FormatSuccess("History cleared."))
 		return slashHandled
 	case "/tools":
-		fmt.Fprintln(state.out, "Available tools:")
-		for _, t := range state.ag.Tools() {
-			fmt.Fprintf(state.out, "  %-20s %s\n", t.Def.Name, t.Def.Description)
-		}
+		renderToolsTable(state)
 		return slashHandled
 	case "/cost":
-		costStr := llm.FormatCost(state.sessionUsage, state.model)
-		if costStr == "" {
-			costStr = "unknown (no pricing for model)"
-		}
-		fmt.Fprintf(state.out, "Session: %d prompt + %d completion = %d tokens | ~%s\n",
-			state.sessionUsage.PromptTokens,
-			state.sessionUsage.CompletionTokens,
-			state.sessionUsage.TotalTokens,
-			costStr,
-		)
+		renderCostBox(state)
 		return slashHandled
 	case "/help":
-		fmt.Fprintln(state.out, "Commands:")
-		fmt.Fprintln(state.out, "  /clear    Reset conversation history")
-		fmt.Fprintln(state.out, "  /tools    List available tools")
-		fmt.Fprintln(state.out, "  /cost     Show accumulated session cost")
-		fmt.Fprintln(state.out, "  /help     Show this help")
-		fmt.Fprintln(state.out, "  /quit     Exit chat")
+		renderHelpBox(state.out)
 		return slashHandled
 	default:
-		fmt.Fprintf(state.out, "Unknown command: %s (type /help for commands)\n", line)
+		fmt.Fprintf(state.out, "%s (type /help for commands)\n",
+			ui.FormatWarning("Unknown command: "+line))
 		return slashHandled
 	}
 }
 
-// interactiveConfirm creates a ConfirmFunc that prompts the user on stderr/stdin.
+// renderHelpBox displays available commands in a styled box.
+func renderHelpBox(w io.Writer) {
+	commands := [][]string{
+		{"/clear", "Reset conversation history"},
+		{"/tools", "List available tools"},
+		{"/cost", "Show accumulated session cost"},
+		{"/help", "Show this help"},
+		{"/quit", "Exit chat"},
+	}
+	headers := []string{"COMMAND", "DESCRIPTION"}
+	fmt.Fprintln(w, ui.RenderBox("Commands", ui.RenderTable(headers, commands, -1)))
+}
+
+// renderToolsTable displays tools with their permission levels.
+func renderToolsTable(state *chatState) {
+	headers := []string{"TOOL", "PERMISSION", "DESCRIPTION"}
+	var rows [][]string
+
+	var perms map[string]agent.PermissionLevel
+	if state.permChecker != nil {
+		perms = state.permChecker.Permissions()
+	} else {
+		perms = agent.DefaultPermissions()
+	}
+
+	for _, t := range state.ag.Tools() {
+		level := perms[t.Def.Name]
+		levelStr := level.String()
+		if ui.ColorEnabled() {
+			switch level {
+			case agent.PermAuto:
+				levelStr = ui.SuccessStyle.Render(levelStr)
+			case agent.PermConfirm:
+				levelStr = ui.WarningStyle.Render(levelStr)
+			case agent.PermDeny:
+				levelStr = ui.ErrorStyle.Render(levelStr)
+			}
+		}
+		rows = append(rows, []string{t.Def.Name, levelStr, t.Def.Description})
+	}
+	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+}
+
+// renderCostBox displays accumulated session cost in a styled box.
+func renderCostBox(state *chatState) {
+	costStr := llm.FormatCost(state.sessionUsage, state.model)
+	if costStr == "" {
+		costStr = "unknown (no pricing for model)"
+	}
+	content := fmt.Sprintf("Prompt tokens:     %d\nCompletion tokens: %d\nTotal tokens:      %d\nEstimated cost:    ~%s",
+		state.sessionUsage.PromptTokens,
+		state.sessionUsage.CompletionTokens,
+		state.sessionUsage.TotalTokens,
+		costStr,
+	)
+	fmt.Fprintln(state.out, ui.RenderBox("Session Cost", content))
+}
+
+// interactiveConfirm creates a ConfirmFunc that prompts the user on stderr/stdin
+// using a styled confirmation box.
 func interactiveConfirm(scanner *bufio.Scanner) agent.ConfirmFunc {
 	return func(tc llm.ToolCall, preview string) agent.ConfirmResult {
-		fmt.Fprintf(os.Stderr, "\n%s\n", preview)
-		fmt.Fprint(os.Stderr, "[allow] y/n/always? ")
+		fmt.Fprint(os.Stderr, ui.RenderConfirmBox(preview))
 		if !scanner.Scan() {
 			return agent.ConfirmNo
 		}
@@ -156,10 +200,10 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				}))
 			}
 
-			// Show tool calls inline in dim text.
+			// Show tool calls inline using styled FormatToolCall.
 			opts = append(opts, agent.WithToolCallCallback(func(tc llm.ToolCall) {
 				argSummary := formatToolArgs(tc)
-				fmt.Fprintf(os.Stderr, "\033[2m→ %s(%s)\033[0m\n", tc.Name, argSummary)
+				fmt.Fprintln(os.Stderr, ui.FormatToolCall(tc.Name, argSummary))
 			}))
 
 			opts = append(opts, agent.WithPermissionChecker(pc))
@@ -167,16 +211,25 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			ag := agent.New(provider, rt, log, opts...)
 
 			state := &chatState{
-				ag:    ag,
-				model: provider.Model(),
-				out:   os.Stderr,
+				ag:          ag,
+				permChecker: pc,
+				model:       provider.Model(),
+				out:         os.Stderr,
 			}
 
-			fmt.Fprintf(os.Stderr, "Chat with %s (%s). Type /help for commands, /quit to exit.\n\n",
-				provider.Name(), provider.Model())
+			// Welcome banner.
+			fmt.Fprintln(os.Stderr, ui.RenderWelcomeBanner(
+				provider.Name(), provider.Model(),
+				cfg.TargetDir, cfg.Mode,
+			))
+			fmt.Fprintln(os.Stderr)
 
 			for {
-				fmt.Fprint(os.Stderr, "you> ")
+				if ui.ColorEnabled() {
+					fmt.Fprint(os.Stderr, ui.UserPromptStyle.Render("you> "))
+				} else {
+					fmt.Fprint(os.Stderr, "you> ")
+				}
 				if !scanner.Scan() {
 					break
 				}
@@ -195,15 +248,27 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					continue
 				}
 
-				// Stream tokens as they arrive.
+				// Show spinner while waiting for first token.
+				spinner := ui.NewSpinner(os.Stderr, "Thinking...")
+				spinner.Start()
+				firstToken := true
+
+				// Stream tokens as they arrive, rendering markdown at the end.
+				var responseBuf strings.Builder
 				streamCB := func(text string) error {
+					if firstToken {
+						spinner.Stop()
+						firstToken = false
+					}
+					responseBuf.WriteString(text)
 					_, writeErr := fmt.Fprint(os.Stdout, text)
 					return writeErr
 				}
 
 				result, err := ag.Run(cmd.Context(), line, streamCB)
+				spinner.Stop() // Ensure spinner is stopped on error too.
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "\nerror: %v\n", err)
+					fmt.Fprintf(os.Stderr, "\n%s\n", ui.FormatError(err.Error()))
 					continue
 				}
 
@@ -214,31 +279,16 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				state.sessionUsage.CompletionTokens += result.Usage.CompletionTokens
 				state.sessionUsage.TotalTokens += result.Usage.TotalTokens
 
-				{
-					costStr := llm.FormatCost(result.Usage, provider.Model())
-					if costStr != "" {
-						costStr = " | ~" + costStr
-					}
-					elapsed := fmt.Sprintf("%.1fs", result.Duration.Seconds())
-					if len(result.Steps) > 0 {
-						fmt.Fprintf(os.Stderr, "[%d tool calls | %d + %d = %d tokens%s | %s]\n",
-							len(result.Steps),
-							result.Usage.PromptTokens,
-							result.Usage.CompletionTokens,
-							result.Usage.TotalTokens,
-							costStr,
-							elapsed,
-						)
-					} else {
-						fmt.Fprintf(os.Stderr, "[%d + %d = %d tokens%s | %s]\n",
-							result.Usage.PromptTokens,
-							result.Usage.CompletionTokens,
-							result.Usage.TotalTokens,
-							costStr,
-							elapsed,
-						)
-					}
-				}
+				// Summary line.
+				costStr := llm.FormatCost(result.Usage, provider.Model())
+				summary := ui.FormatSummary(
+					len(result.Steps),
+					result.Usage.PromptTokens,
+					result.Usage.CompletionTokens,
+					costStr,
+					result.Duration,
+				)
+				fmt.Fprintln(os.Stderr, summary)
 				fmt.Fprintln(os.Stderr)
 			}
 

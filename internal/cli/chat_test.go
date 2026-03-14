@@ -12,6 +12,7 @@ import (
 	"github.com/gajaai/openmarmut-go/internal/agent"
 	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/gajaai/openmarmut-go/internal/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,11 +46,13 @@ var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func newTestState() (*chatState, *bytes.Buffer) {
 	ag := agent.New(&panicProvider{}, &stubRuntime{}, testLogger)
+	pc := agent.NewPermissionChecker(agent.DefaultPermissions(), nil)
 	var buf bytes.Buffer
 	state := &chatState{
-		ag:    ag,
-		model: "gpt-4o",
-		out:   &buf,
+		ag:          ag,
+		permChecker: pc,
+		model:       "gpt-4o",
+		out:         &buf,
 	}
 	return state, &buf
 }
@@ -77,6 +80,16 @@ func TestSlashTools_NoLLMCall(t *testing.T) {
 	assert.Contains(t, output, "patch_file")
 }
 
+func TestSlashTools_ShowsPermissions(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/tools", state)
+
+	output := buf.String()
+	// read_file should be auto, write_file should be confirm.
+	assert.Contains(t, output, "auto")
+	assert.Contains(t, output, "confirm")
+}
+
 func TestSlashCost_NoLLMCall(t *testing.T) {
 	state, buf := newTestState()
 	state.sessionUsage = llm.Usage{
@@ -91,6 +104,17 @@ func TestSlashCost_NoLLMCall(t *testing.T) {
 	assert.Contains(t, output, "100")
 	assert.Contains(t, output, "50")
 	assert.Contains(t, output, "150")
+}
+
+func TestSlashCost_ShowsBox(t *testing.T) {
+	state, buf := newTestState()
+	state.sessionUsage = llm.Usage{PromptTokens: 200, CompletionTokens: 80, TotalTokens: 280}
+	handleSlashCommand("/cost", state)
+
+	output := buf.String()
+	assert.Contains(t, output, "Session Cost")
+	assert.Contains(t, output, "Prompt tokens")
+	assert.Contains(t, output, "Completion tokens")
 }
 
 func TestSlashClear_NoLLMCall(t *testing.T) {
@@ -187,4 +211,56 @@ func TestFormatToolArgs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderHelpBox(t *testing.T) {
+	var buf bytes.Buffer
+	renderHelpBox(&buf)
+
+	output := buf.String()
+	assert.Contains(t, output, "Commands")
+	assert.Contains(t, output, "/clear")
+	assert.Contains(t, output, "Reset conversation history")
+}
+
+func TestRenderToolsTable_WithPermChecker(t *testing.T) {
+	state, buf := newTestState()
+	// Override one permission.
+	state.permChecker.SetPermission("write_file", agent.PermDeny)
+
+	renderToolsTable(state)
+	output := buf.String()
+	assert.Contains(t, output, "write_file")
+	assert.Contains(t, output, "deny")
+}
+
+func TestRenderCostBox(t *testing.T) {
+	state, buf := newTestState()
+	state.sessionUsage = llm.Usage{
+		PromptTokens:     500,
+		CompletionTokens: 200,
+		TotalTokens:      700,
+	}
+
+	renderCostBox(state)
+	output := buf.String()
+	assert.Contains(t, output, "500")
+	assert.Contains(t, output, "200")
+	assert.Contains(t, output, "700")
+	assert.Contains(t, output, "Session Cost")
+}
+
+func TestWelcomeBanner(t *testing.T) {
+	result := ui.RenderWelcomeBanner("azure-codex", "gpt-5.1", "/tmp/project", "local")
+	assert.Contains(t, result, "azure-codex")
+	assert.Contains(t, result, "gpt-5.1")
+	assert.Contains(t, result, "/tmp/project")
+	assert.Contains(t, result, "local")
+}
+
+func TestConfirmBox(t *testing.T) {
+	result := ui.RenderConfirmBox("→ write_file(main.go)")
+	assert.Contains(t, result, "Permission Required")
+	assert.Contains(t, result, "write_file")
+	assert.Contains(t, result, "[y]es")
 }

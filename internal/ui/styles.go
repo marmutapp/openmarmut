@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -175,6 +176,69 @@ func RenderTable(headers []string, rows [][]string, activeRow int) string {
 	}
 
 	return sb.String()
+}
+
+// RenderWelcomeBanner renders the branded welcome box with session info.
+func RenderWelcomeBanner(providerName, model, targetDir, mode string) string {
+	lines := []string{
+		FormatKeyValue("Provider", providerName+" ("+model+")"),
+		FormatKeyValue("Target", targetDir),
+		FormatKeyValue("Mode", mode),
+		"",
+		"Type /help for commands, /quit to exit",
+	}
+	content := strings.Join(lines, "\n")
+
+	if !ColorEnabled() {
+		return fmt.Sprintf("── OpenMarmut ──\n%s\n────────", content)
+	}
+
+	title := " " + BrandStyle.Render("OpenMarmut") + " "
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBrand).
+		BorderTop(true).
+		Padding(0, 1).
+		Render(content)
+	// Replace the top border segment with the title.
+	topBorder := "╭─"
+	idx := strings.Index(box, topBorder)
+	if idx >= 0 {
+		box = box[:idx] + "╭─" + title + strings.Repeat("─", 40) + box[idx+len(topBorder)+42:]
+	}
+	return box
+}
+
+// RenderConfirmBox renders a permission confirmation prompt inside a yellow-bordered box.
+// The footer contains the key hint.
+func RenderConfirmBox(preview string) string {
+	if !ColorEnabled() {
+		return fmt.Sprintf("── Permission Required ──\n%s\n── [y]es / [n]o / [a]lways ──", preview)
+	}
+	box := ConfirmBoxStyle.Render(preview)
+	header := WarningStyle.Render("Permission Required")
+	footer := DimStyle.Render("[y]es / [n]o / [a]lways")
+	return "\n" + header + "\n" + box + "\n" + footer + " "
+}
+
+// RenderMarkdown renders markdown text with glamour (dark theme).
+// Falls back to plain text if glamour fails or color is disabled.
+func RenderMarkdown(md string) string {
+	if !ColorEnabled() {
+		return md
+	}
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(100),
+	)
+	if err != nil {
+		return md
+	}
+	out, err := r.Render(md)
+	if err != nil {
+		return md
+	}
+	return strings.TrimRight(out, "\n")
 }
 
 // HumanizeBytes formats a byte count into a human-readable string.

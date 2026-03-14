@@ -182,3 +182,66 @@ func TestColorEnabled_ProducesANSI(t *testing.T) {
 	result := FormatError("test")
 	assert.Contains(t, result, "\033[", "should contain ANSI escapes when color enabled")
 }
+
+func TestRenderWelcomeBanner_NoColor(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	result := RenderWelcomeBanner("azure-codex", "gpt-5.1", "/tmp/project", "local")
+	assert.Contains(t, result, "OpenMarmut")
+	assert.Contains(t, result, "azure-codex")
+	assert.Contains(t, result, "gpt-5.1")
+	assert.Contains(t, result, "/tmp/project")
+	assert.Contains(t, result, "local")
+	assert.Contains(t, result, "/help")
+}
+
+func TestRenderWelcomeBanner_WithColor(t *testing.T) {
+	overrideTTY(true)
+	defer overrideTTY(false)
+
+	result := RenderWelcomeBanner("claude", "opus", "/home/user", "docker")
+	assert.Contains(t, result, "claude")
+	assert.Contains(t, result, "opus")
+	assert.Contains(t, result, "/home/user")
+	assert.Contains(t, result, "docker")
+}
+
+func TestRenderConfirmBox_NoColor(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	result := RenderConfirmBox("→ write_file(main.go)")
+	assert.Contains(t, result, "Permission Required")
+	assert.Contains(t, result, "write_file")
+	assert.Contains(t, result, "[y]es")
+	assert.Contains(t, result, "[n]o")
+	assert.Contains(t, result, "[a]lways")
+}
+
+func TestRenderConfirmBox_WithColor(t *testing.T) {
+	overrideTTY(true)
+	defer overrideTTY(false)
+
+	result := RenderConfirmBox("→ execute_command\n  $ rm -rf /tmp/test")
+	assert.Contains(t, result, "Permission Required")
+	assert.Contains(t, result, "execute_command")
+}
+
+func TestRenderMarkdown_NoColor(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	result := RenderMarkdown("# Hello\n\nSome **bold** text")
+	assert.Contains(t, result, "Hello")
+	assert.Contains(t, result, "bold")
+}
+
+func TestRenderMarkdown_WithColor(t *testing.T) {
+	overrideTTY(true)
+	defer overrideTTY(false)
+
+	result := RenderMarkdown("# Hello\n\nSome `code` here")
+	assert.Contains(t, result, "Hello")
+	assert.Contains(t, result, "code")
+}

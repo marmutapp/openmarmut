@@ -172,6 +172,21 @@
 - [x] `internal/ui/spinner_test.go` — 4 tests (start/stop, idempotent, no-TTY, default message)
 - [x] Dependencies: charmbracelet/lipgloss, charmbracelet/glamour
 
+### Phase 10.3: Chat REPL Styled UI
+- [x] Welcome banner — branded box with provider/model/target/mode info
+- [x] User prompt — bold cyan "you>" via UserPromptStyle
+- [x] Tool calls — styled via FormatToolCall (replaces raw ANSI escapes)
+- [x] Permission prompts — yellow-bordered ConfirmBox with [y]es/[n]o/[a]lways footer
+- [x] Summary line — FormatSummary with dim styled tokens/cost/duration
+- [x] Spinner — "Thinking..." spinner while waiting for LLM response
+- [x] Error display — FormatError with red ✗ prefix
+- [x] /help — styled box with command table
+- [x] /tools — styled table with tool name, permission level (green auto/yellow confirm), description
+- [x] /cost — styled box with prompt/completion/total tokens and estimated cost
+- [x] /clear — styled success message with ✓ prefix
+- [x] New style helpers: RenderWelcomeBanner, RenderConfirmBox, RenderMarkdown
+- [x] 25 new tests (styles_test.go + chat_test.go), all 17 packages pass
+
 ---
 
 ## Completion Criteria
@@ -212,5 +227,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 
 2026-03-15 | Phase 10.1 | Renamed project from OpenCode to OpenMarmut: go.mod module path, all imports, cmd/opencode→cmd/openmarmut, CLI root command, env var prefix OPENCODE_→OPENMARMUT_, config file .opencode.yaml→.openmarmut.yaml, all docs/specs/progress/rules. All 16 packages pass. | Phase 10.2: UI style system
 2026-03-15 | Phase 10.2 | UI style system: internal/ui package with tty.go (TTY/NO_COLOR detection, lipgloss profile sync), styles.go (6 colors, 15 named styles, 9 helpers), spinner.go (braille animation, goroutine-based). 23 tests. Dependencies: lipgloss + glamour. All 17 packages pass. | Wire UI into CLI commands
+2026-03-15 | Phase 10.3 | Chat REPL styled UI: welcome banner, UserPromptStyle, FormatToolCall, ConfirmBox permission prompts, FormatSummary, spinner, styled /help+/tools+/cost+/clear. New helpers: RenderWelcomeBanner, RenderConfirmBox, RenderMarkdown. 25 new tests. All 17 packages pass. | Continue Phase 10 polish
 
 <!-- Claude: append a new line here after each working session -->
