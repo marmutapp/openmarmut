@@ -303,11 +303,12 @@ func Validate(cfg *Config) error {
 
 // validProviderTypes lists the recognized wire format type names.
 var validProviderTypes = map[string]bool{
-	"openai":    true,
-	"anthropic": true,
-	"gemini":    true,
-	"ollama":    true,
-	"custom":    true,
+	"openai":            true,
+	"openai-responses":  true,
+	"anthropic":         true,
+	"gemini":            true,
+	"ollama":            true,
+	"custom":            true,
 }
 
 // validateLLM checks the LLM config section and appends any errors to errs.
@@ -323,7 +324,7 @@ func validateLLM(llmCfg *LLMConfig, errs *[]string) {
 			seen[p.Name] = true
 		}
 		if !validProviderTypes[p.Type] {
-			*errs = append(*errs, fmt.Sprintf("%s.type must be openai/anthropic/gemini/ollama/custom, got %q", prefix, p.Type))
+			*errs = append(*errs, fmt.Sprintf("%s.type must be openai/openai-responses/anthropic/gemini/ollama/custom, got %q", prefix, p.Type))
 		}
 		if p.ModelName == "" {
 			*errs = append(*errs, prefix+".model must not be empty")

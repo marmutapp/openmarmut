@@ -61,7 +61,7 @@ func ApplyAuth(req *http.Request, auth AuthConfig, resolvedKey string) {
 // DefaultAuthForType returns the default AuthConfig for a provider type.
 func DefaultAuthForType(typeName string) AuthConfig {
 	switch typeName {
-	case "openai":
+	case "openai", "openai-responses":
 		return AuthConfig{Type: "bearer", TokenPrefix: "Bearer "}
 	case "anthropic":
 		return AuthConfig{Type: "header", HeaderName: "x-api-key"}
@@ -78,7 +78,7 @@ func DefaultAuthForType(typeName string) AuthConfig {
 // Returns empty string for types that have no default (e.g., "custom").
 func DefaultEndpointURL(typeName string) string {
 	switch typeName {
-	case "openai":
+	case "openai", "openai-responses":
 		return "https://api.openai.com"
 	case "anthropic":
 		return "https://api.anthropic.com"
