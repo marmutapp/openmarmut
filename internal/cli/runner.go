@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/gajaai/opencode-go/internal/config"
 	"github.com/gajaai/opencode-go/internal/logger"
@@ -47,4 +48,17 @@ func (r *Runner) Run(ctx context.Context, fn func(ctx context.Context, rt runtim
 	}()
 
 	return fn(ctx, rt)
+}
+
+// initRuntime creates and initializes a Runtime from config.
+// The caller is responsible for calling rt.Close().
+func initRuntime(ctx context.Context, cfg *config.Config, log *slog.Logger) (runtime.Runtime, error) {
+	rt, err := runtime.NewRuntime(cfg, log)
+	if err != nil {
+		return nil, fmt.Errorf("initRuntime: %w", err)
+	}
+	if err := rt.Init(ctx); err != nil {
+		return nil, fmt.Errorf("initRuntime: %w", err)
+	}
+	return rt, nil
 }

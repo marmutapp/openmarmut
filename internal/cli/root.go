@@ -75,6 +75,7 @@ func NewRootCmd() *cobra.Command {
 		newInfoCmd(runner),
 		newProvidersCmd(runner),
 		newAskCmd(runner),
+		newChatCmd(runner),
 	)
 
 	return root
