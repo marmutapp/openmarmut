@@ -601,4 +601,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 
 2026-03-15 | Phase 13.4 | PR status display, key bindings, and final polish: PRDetector with gh CLI integration (detect/checks/open), inputHistory with file persistence and navigation, enhanced welcome banner with BannerInfo (branch, PR status color-coded, session, instructions, rules/skills counts), categorized /help with 7 groups, /pr slash command (/pr, /pr open, /pr checks), CurrentBranch helper. 5 PR tests + 7 history tests + 2 banner tests + 5 chat tests. All 19 packages pass. Phase 13 complete. | Done
 
+2026-03-15 | Docs | Updated full-test-suite.md for Phases 12-13: added sections 15-20 (hooks, image input, agent teams, PR status, input history, key bindings), fixed exec exit code docs, updated test matrix (640+ unit, 110+ manual). Verified all 19 packages pass, binary builds clean. Ran Section 1 (core runtime) and Section 2 (LLM providers) manually — all non-live-API tests pass. | Done
+
 <!-- Claude: append a new line here after each working session -->

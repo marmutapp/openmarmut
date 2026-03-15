@@ -1,6 +1,6 @@
 # OpenMarmut Full Test Suite
 
-**Covers every feature across all phases (1–12)**
+**Covers every feature across all phases (1–13)**
 **Platform:** Ubuntu 22.04+, Go 1.22+, Azure OpenAI endpoint
 **Last verified:** 2026-03-15
 
@@ -99,7 +99,9 @@ cd /tmp/test-project
 
 # Exit code forwarding
 ./openmarmut exec -- bash -c "exit 42"
-# Expected: exit code: 42 (NOT an error)
+# Expected: binary exits with code 42 (NOT treated as error, no error message)
+echo $?
+# Expected: 42
 
 # Command with stdin/stdout
 ./openmarmut exec -- ls -la
@@ -1370,6 +1372,394 @@ EOF
 
 ---
 
+## 15. HOOKS SYSTEM
+
+### 15.1 Shell Hook Configuration
+
+```bash
+cd /tmp/test-project
+
+# Add hooks to config
+cat >> /tmp/test-project/.openmarmut.yaml << 'YAMLEOF'
+
+hooks:
+  - event: pre_tool
+    type: shell
+    command: "echo hook fired"
+    on_error: continue
+  - event: post_tool
+    type: shell
+    command: "echo post-tool"
+    tools:
+      - write_file
+    on_error: continue
+  - event: pre_session
+    type: shell
+    command: "echo session started"
+YAMLEOF
+
+# List hooks in chat
+./openmarmut chat << 'EOF'
+/hooks
+/quit
+EOF
+# Expected: styled list showing 3 hooks with event, type, command, on_error
+```
+
+### 15.2 Hook Enable/Disable
+
+```bash
+cd /tmp/test-project
+
+./openmarmut chat << 'EOF'
+/hooks off
+/hooks
+/hooks on
+/hooks
+/quit
+EOF
+# Expected:
+# - /hooks off: "Hooks disabled for this session"
+# - /hooks (while off): shows hooks but with disabled indicator
+# - /hooks on: "Hooks enabled"
+# - /hooks (while on): shows hooks as active
+```
+
+### 15.3 Hook Test Fire
+
+```bash
+cd /tmp/test-project
+
+./openmarmut chat << 'EOF'
+/hooks test 1
+/quit
+EOF
+# Expected: fires hook #1 with sample payload, shows output or error
+```
+
+### 15.4 HTTP Hook Configuration
+
+```bash
+cd /tmp/test-project
+
+# Add HTTP hook to config
+cat >> /tmp/test-project/.openmarmut.yaml << 'YAMLEOF'
+
+  - event: post_tool
+    type: http
+    url: http://localhost:9999/webhook
+    headers:
+      Authorization: "Bearer env:MY_TOKEN"
+    on_error: continue
+YAMLEOF
+
+./openmarmut chat << 'EOF'
+/hooks
+/quit
+EOF
+# Expected: shows HTTP hook with URL and event type
+```
+
+### 15.5 Hook Event Types
+
+```bash
+# Verify hook events via unit tests
+go test ./internal/agent/ -run TestHook -v
+# Expected: all hook tests pass (shell, HTTP, abort, tool filtering, event types)
+```
+
+---
+
+## 16. IMAGE INPUT
+
+### 16.1 Image via --image Flag (ask command)
+
+```bash
+cd /tmp/test-project
+
+# Create a test PNG (1x1 pixel)
+printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde' > test.png
+
+# Ask with image (requires vision-capable provider)
+./openmarmut ask --image test.png "Describe this image"
+# Expected: shows "📎 test.png (size, image/png)" attachment indicator
+# Then: LLM response describing the image (or error if provider doesn't support vision)
+```
+
+### 16.2 Image via @ File Reference (chat)
+
+```bash
+cd /tmp/test-project
+
+# Create test image
+printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde' > ref-test.png
+
+./openmarmut chat << 'EOF'
+What is in @ref-test.png?
+/quit
+EOF
+# Expected: image detected as attachment (not inlined as text)
+# Shows "📎 ref-test.png" indicator before sending to LLM
+```
+
+### 16.3 Image MIME Detection
+
+```bash
+# Verify MIME detection via unit tests
+go test ./internal/agent/ -run TestImage -v
+# Expected: all image tests pass (PNG/JPEG/GIF/WebP detection, LoadImage, size limits)
+```
+
+### 16.4 Unsupported Image Format
+
+```bash
+cd /tmp/test-project
+
+echo "not an image" > fake.png
+./openmarmut ask --image fake.png "Describe this"
+# Expected: error about unsupported image format or invalid image data
+```
+
+### 16.5 Multiple Images
+
+```bash
+cd /tmp/test-project
+
+printf '\x89PNG\r\n\x1a\n' > img1.png
+printf '\xff\xd8\xff\xe0' > img2.jpg
+
+./openmarmut ask --image img1.png --image img2.jpg "Compare these images"
+# Expected: both images attached, shown as separate 📎 indicators
+```
+
+---
+
+## 17. AGENT TEAMS
+
+### 17.1 Team Execution
+
+```bash
+cd /tmp/test-project
+
+echo "package main\nfunc main() {}" > main.go
+echo "test data" > data.txt
+
+./openmarmut chat << 'EOF'
+/team Analyze all files: summarize main.go and count lines in data.txt
+/quit
+EOF
+# Expected: team executes in 3 phases:
+# 1. Planning: lead agent breaks task into subtasks
+# 2. Execution: workers run subtasks (in parallel by default)
+# 3. Integration: lead agent produces summary from worker results
+```
+
+### 17.2 Team Status
+
+```bash
+cd /tmp/test-project
+
+./openmarmut chat << 'EOF'
+/team status
+/quit
+EOF
+# Expected: "No teams running" or list of active/completed teams
+```
+
+### 17.3 Team Cancel
+
+```bash
+cd /tmp/test-project
+
+./openmarmut chat << 'EOF'
+/team Analyze the entire codebase
+/team cancel
+/quit
+EOF
+# Expected: cancels the running team execution
+```
+
+### 17.4 Team History
+
+```bash
+cd /tmp/test-project
+
+./openmarmut chat << 'EOF'
+/team history
+/quit
+EOF
+# Expected: shows completed team runs with results summary
+```
+
+### 17.5 Team Config
+
+```bash
+# Add team config to .openmarmut.yaml
+cat >> /tmp/test-project/.openmarmut.yaml << 'YAMLEOF'
+
+agent:
+  team:
+    max_members: 4
+    strategy: parallel
+YAMLEOF
+
+./openmarmut chat << 'EOF'
+/team status
+/quit
+EOF
+# Expected: team respects config (max 4 workers, parallel strategy)
+```
+
+### 17.6 File Locking in Teams
+
+```bash
+# Verify file locking via unit tests
+go test ./internal/agent/ -run TestFileLock -v
+# Expected: all file lock tests pass (acquire/release, timeout, concurrent access)
+
+go test ./internal/agent/ -run TestTeam -v
+# Expected: all team tests pass (parallel/sequential execution, plan parsing, format)
+```
+
+---
+
+## 18. PR STATUS
+
+### 18.1 PR Detection
+
+```bash
+cd /tmp/test-project
+git init 2>/dev/null
+git add -A && git commit -m "initial" 2>/dev/null
+
+./openmarmut chat << 'EOF'
+/pr
+/quit
+EOF
+# Expected: shows PR status for current branch, or "No PR found" if not on a PR branch
+# Requires: gh CLI installed and authenticated
+```
+
+### 18.2 PR Checks
+
+```bash
+cd /tmp/test-project
+
+./openmarmut chat << 'EOF'
+/pr checks
+/quit
+EOF
+# Expected: shows CI check statuses for the PR, or error if no PR exists
+```
+
+### 18.3 PR Open in Browser
+
+```bash
+cd /tmp/test-project
+
+./openmarmut chat << 'EOF'
+/pr open
+/quit
+EOF
+# Expected: opens PR in default browser, or error if no PR exists
+```
+
+### 18.4 PR Status Formatting
+
+```bash
+# Verify PR status formatting via unit tests
+go test ./internal/agent/ -run TestPR -v
+# Expected: all PR tests pass (approved/changes/review/open/merged status formatting)
+```
+
+---
+
+## 19. INPUT HISTORY
+
+### 19.1 History Persistence
+
+```bash
+cd /tmp/test-project
+
+# History is stored at ~/.config/openmarmut/history
+# After a chat session, previous inputs are saved
+
+./openmarmut chat << 'EOF'
+Hello world
+Testing history
+/quit
+EOF
+
+# Verify history file exists
+cat ~/.config/openmarmut/history 2>/dev/null | tail -5
+# Expected: contains "Hello world" and "Testing history"
+```
+
+### 19.2 History Navigation (Interactive)
+
+```bash
+cd /tmp/test-project
+
+# Interactive test — run manually:
+# 1. Start: ./openmarmut chat
+# 2. Type "first message" and send
+# 3. Type "second message" and send
+# 4. Press Up arrow — should show "second message"
+# 5. Press Up arrow again — should show "first message"
+# 6. Press Down arrow — should show "second message"
+# 7. Type /quit
+```
+
+### 19.3 History Deduplication
+
+```bash
+# Verify via unit tests
+go test ./internal/cli/ -run TestHistory -v
+# Expected: all history tests pass (add, navigate, dedup, max entries, save/load, reset)
+```
+
+---
+
+## 20. KEY BINDINGS
+
+### 20.1 Ctrl+C Interrupt
+
+```bash
+cd /tmp/test-project
+
+# Interactive test — run manually:
+# 1. Start: ./openmarmut chat
+# 2. Start a long-running ask (e.g., "Write a very long essay about Go")
+# 3. Press Ctrl+C during streaming
+# Expected: interrupts the current response, returns to prompt
+# 4. Type /quit
+```
+
+### 20.2 Ctrl+L Clear Screen
+
+```bash
+cd /tmp/test-project
+
+# Interactive test — run manually:
+# 1. Start: ./openmarmut chat
+# 2. Type several messages to fill the screen
+# 3. Press Ctrl+L
+# Expected: screen cleared, prompt remains
+# 4. Type /quit
+```
+
+### 20.3 EOF Handling
+
+```bash
+cd /tmp/test-project
+
+# Ctrl+D (EOF) should exit chat gracefully
+./openmarmut chat < /dev/null
+# Expected: exits cleanly without error
+```
+
+---
+
 ## Automated Unit Test Results
 
 Run the full unit test suite to verify all features at the code level:
@@ -1380,7 +1770,7 @@ cd /path/to/opencode-go
 # All unit tests (19 packages)
 go test ./... -v -count=1 2>&1 | tail -30
 # Expected: all PASS
-# Approximate test count: 400+ tests across 19 packages
+# Approximate test count: 600+ tests across 19 packages
 
 # Individual package tests for targeted verification
 go test ./internal/pathutil/ -v          # path sandboxing
@@ -1448,6 +1838,12 @@ echo $?
 | Tasks                 | 14 tests   | 1 test       | —            |
 | Custom Commands       | 12 tests   | 2 tests      | —            |
 | /btw, /loop, /bg      | 20 tests   | 3 tests      | —            |
-| UI Styles             | 23+ tests  | 4 tests      | —            |
-| Chat REPL             | 80+ tests  | 20+ tests    | —            |
-| **Total**             | **~550+**  | **~90+**     | **16**       |
+| Hooks System          | 33 tests   | 5 tests      | —            |
+| Image Input           | 18 tests   | 5 tests      | —            |
+| Agent Teams           | 23 tests   | 6 tests      | —            |
+| PR Status             | 5 tests    | 4 tests      | —            |
+| Input History         | 7 tests    | 3 tests      | —            |
+| Key Bindings          | —          | 3 tests      | —            |
+| UI Styles             | 25+ tests  | 4 tests      | —            |
+| Chat REPL             | 96+ tests  | 20+ tests    | —            |
+| **Total**             | **~640+**  | **~110+**    | **16**       |
