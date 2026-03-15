@@ -233,6 +233,9 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 	case "/sessions":
 		renderSessionsList(state)
 		return slashHandled
+	case "/version":
+		fmt.Fprintln(state.out, VersionString())
+		return slashHandled
 	case "/help":
 		renderHelpBox(state.out)
 		return slashHandled
@@ -297,6 +300,7 @@ func renderHelpBox(w io.Writer) {
 			{"/tasks", "Show tracked tasks"},
 		}},
 		{"System", [][]string{
+			{"/version", "Show version info"},
 			{"/help", "Show this help"},
 			{"/quit", "Exit chat"},
 		}},

@@ -24,6 +24,7 @@ func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "openmarmut",
 		Short:         "CLI tool for AI-assisted development with local or Docker runtimes",
+		Version:       VersionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
