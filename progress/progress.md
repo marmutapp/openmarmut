@@ -413,6 +413,26 @@
 - [x] 7 new chat tests (agents list empty, agents with entries, agents kill no manager, agents kill nonexistent, agent missing task, help includes agent, commands never call provider)
 - [x] All 18 packages pass
 
+### Phase 12.3: Custom Commands, /btw Side Questions, /loop Mode
+- [x] `internal/agent/commands.go` — CustomCommand struct, LoadCustomCommands, parseCustomCommand, FindCustomCommand, FormatCustomCommandsList
+- [x] Custom command loading from .openmarmut/commands/*.md with YAML frontmatter (description field)
+- [x] Custom command arguments: `/test src/auth/` appends args to content
+- [x] `/commands` slash command — list all custom commands with descriptions
+- [x] Custom command dispatch — matches unknown slash commands against loaded commands, sends content to agent
+- [x] `/btw <question>` — isolated side question via temporary LLM request, no history pollution, styled btw box
+- [x] `/btw` cost tracking — separate token count display
+- [x] `/loop <interval> <command>` — background recurring task via Runtime.Exec on interval
+- [x] `/loop status` — show active loops with interval and command
+- [x] `/loop off` — stop all running loops
+- [x] `loopManager` — goroutine-based with cancel context, bell on failure, compact fail output
+- [x] Multiple simultaneous loops supported
+- [x] Loop cleanup on chat exit (both /quit and EOF)
+- [x] Custom commands displayed on chat startup ("Custom commands: N loaded")
+- [x] `/help` updated with /btw, /loop, /commands entries
+- [x] `internal/agent/commands_test.go` — 12 tests (parse frontmatter, no frontmatter, multiline, unclosed, single-quoted, find, format list, empty list, mock RT loading, no dir, description truncation)
+- [x] `internal/cli/chat_test.go` — 20 new tests (commands list empty/with entries, custom command found/args/not found/no commands, btw response/empty/no provider/history isolation, loop empty/invalid/short/missing cmd/start/status empty/status entry/off/multiple, help includes new, never call provider)
+- [x] All 19 packages pass
+
 ---
 
 ## Completion Criteria
@@ -470,5 +490,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 12.1 | Sub-agent system: SubAgent struct with isolated context, SpawnSubAgent (sync), SubAgentManager (async+track+kill), spawn_subagent LLM tool with WithSubAgentProvider, /agent slash command with --provider/--name flags, /agents list+kill commands, FormatToolPreview for spawn_subagent, 22 sub-agent tests + 7 chat tests. All 18 packages pass. | Done
 
 2026-03-15 | Phase 12.2 | MCP support: internal/mcp package with SSE and stdio transports, JSON-RPC 2.0 protocol (initialize, tools/list, tools/call), Manager for multi-server connections, MCPToolsFromManager for agent integration with prefixed names, MCPConfig in config, CLI commands (mcp list/add/test), /mcp slash command in chat, MCP status in welcome banner. 33 new tests (25 mcp + 8 agent). All 19 packages pass. | Done
+
+2026-03-15 | Phase 12.3 | Custom commands (.openmarmut/commands/*.md with frontmatter, args support), /btw side questions (isolated LLM request, no history pollution, styled box), /loop mode (background recurring tasks via goroutine, status/off, bell on failure, multiple simultaneous loops), /commands listing. 12 agent tests + 20 chat tests. All 19 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->

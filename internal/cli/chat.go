@@ -11,6 +11,7 @@ import (
 	osexec "os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gajaai/openmarmut-go/internal/agent"
@@ -52,10 +53,13 @@ type chatState struct {
 	provider     llm.Provider     // LLM provider for memory extraction.
 	targetDir    string           // target directory for project tagging.
 	autoMemory   bool             // config: auto_memory enabled.
-	subMgr       *agent.SubAgentManager // sub-agent tracker.
-	cfg          *config.Config   // config for sub-agent context settings.
-	log          *slog.Logger     // logger for sub-agent spawning.
-	mcpMgr       *mcp.Manager     // MCP server manager.
+	subMgr         *agent.SubAgentManager // sub-agent tracker.
+	cfg            *config.Config   // config for sub-agent context settings.
+	log            *slog.Logger     // logger for sub-agent spawning.
+	mcpMgr         *mcp.Manager     // MCP server manager.
+	customCommands   []agent.CustomCommand // custom slash commands from .openmarmut/commands/.
+	loopMgr          *loopManager     // /loop background task manager.
+	customCmdContent string           // set by tryCustomCommand to replace user's line.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -142,11 +146,24 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return slashHandled
 	}
 
+	if strings.HasPrefix(line, "/btw ") {
+		handleBtw(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/loop") {
+		handleLoop(line, state)
+		return slashHandled
+	}
+
 	if strings.HasPrefix(line, "/plan") {
 		return handlePlan(line, state)
 	}
 
 	switch line {
+	case "/commands":
+		renderCustomCommands(state)
+		return slashHandled
 	case "/quit", "/exit":
 		return slashExit
 	case "/rules":
@@ -176,6 +193,10 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		renderHelpBox(state.out)
 		return slashHandled
 	default:
+		// Check for custom commands before reporting unknown.
+		if result := tryCustomCommand(line, state); result != slashNone {
+			return result
+		}
 		fmt.Fprintf(state.out, "%s (type /help for commands)\n",
 			ui.FormatWarning("Unknown command: "+line))
 		return slashHandled
@@ -211,6 +232,11 @@ func renderHelpBox(w io.Writer) {
 		{"/agents", "List sub-agents in this session"},
 		{"/agents kill <name>", "Stop a running sub-agent"},
 		{"/mcp", "Show connected MCP servers and tools"},
+		{"/btw <question>", "Quick side question (isolated context)"},
+		{"/loop <int> <cmd>", "Run command on interval (e.g., /loop 5m go test)"},
+		{"/loop status", "Show active loops"},
+		{"/loop off", "Stop all loops"},
+		{"/commands", "List custom commands from .openmarmut/commands/"},
 		{"/sessions", "List recent sessions"},
 		{"/rename <name>", "Rename current session"},
 		{"/help", "Show this help"},
@@ -791,6 +817,283 @@ func handleAgents(line string, state *chatState) {
 	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
 }
 
+// --- Custom Commands ---
+
+// renderCustomCommands lists all custom commands.
+func renderCustomCommands(state *chatState) {
+	if len(state.customCommands) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No custom commands found. Add .md files to .openmarmut/commands/"))
+		return
+	}
+
+	headers := []string{"COMMAND", "DESCRIPTION"}
+	var rows [][]string
+	for _, cmd := range state.customCommands {
+		rows = append(rows, []string{"/" + cmd.Name, cmd.Description})
+	}
+	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+}
+
+// tryCustomCommand checks if the line matches a custom command and returns slashNone if not.
+// If matched, sets customCmdContent on state and returns slashNone to let the main loop send it.
+func tryCustomCommand(line string, state *chatState) slashAction {
+	if len(state.customCommands) == 0 {
+		return slashNone
+	}
+
+	// Extract command name and optional arguments.
+	parts := strings.SplitN(line, " ", 2)
+	cmdName := strings.TrimPrefix(parts[0], "/")
+	cmdArgs := ""
+	if len(parts) > 1 {
+		cmdArgs = parts[1]
+	}
+
+	cmd := agent.FindCustomCommand(state.customCommands, cmdName)
+	if cmd == nil {
+		return slashNone
+	}
+
+	// Build the message from command content + arguments.
+	msg := cmd.Content
+	if cmdArgs != "" {
+		msg += " " + cmdArgs
+	}
+
+	state.customCmdContent = msg
+	fmt.Fprintln(state.out, ui.FormatHint(fmt.Sprintf("Running custom command: /%s", cmd.Name)))
+	return slashHandled // Mark as handled; main loop will check customCmdContent.
+}
+
+// --- /btw Side Questions ---
+
+// handleBtw processes /btw questions using a temporary sub-agent with no context.
+func handleBtw(line string, state *chatState) {
+	question := strings.TrimSpace(strings.TrimPrefix(line, "/btw"))
+	if question == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /btw <question>"))
+		return
+	}
+
+	provider := state.provider
+	if provider == nil {
+		fmt.Fprintln(state.out, ui.FormatError("No LLM provider configured."))
+		return
+	}
+
+	spin := ui.NewSpinner(state.out, "Thinking...")
+	spin.Start()
+
+	// Create a one-shot request with no tools and no conversation context.
+	req := llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: "You are a helpful assistant. Answer concisely."},
+			{Role: llm.RoleUser, Content: question},
+		},
+	}
+
+	resp, err := provider.Complete(context.Background(), req, nil)
+	spin.Stop()
+
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("btw failed: "+err.Error()))
+		return
+	}
+
+	// Display response in a visually distinct box.
+	fmt.Fprintln(state.out, ui.RenderBox("btw", resp.Content))
+
+	// Show cost separately tagged as "btw".
+	costStr := llm.FormatCost(resp.Usage, state.model)
+	if costStr != "" {
+		fmt.Fprintln(state.out, ui.FormatHint(fmt.Sprintf("btw cost: ~%s (%d tokens)", costStr, resp.Usage.TotalTokens)))
+	}
+}
+
+// --- /loop Mode ---
+
+// loopEntry represents a single running loop.
+type loopEntry struct {
+	ID       int
+	Command  string
+	Interval time.Duration
+	cancel   context.CancelFunc
+}
+
+// loopManager tracks background loop tasks.
+type loopManager struct {
+	mu      sync.Mutex
+	loops   []*loopEntry
+	nextID  int
+	rt      runtime.Runtime
+	out     io.Writer
+}
+
+// newLoopManager creates a new loop manager.
+func newLoopManager(rt runtime.Runtime, out io.Writer) *loopManager {
+	return &loopManager{rt: rt, out: out}
+}
+
+// Start begins a new loop with the given interval and command.
+func (m *loopManager) Start(interval time.Duration, command string) int {
+	m.mu.Lock()
+	m.nextID++
+	id := m.nextID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	entry := &loopEntry{
+		ID:       id,
+		Command:  command,
+		Interval: interval,
+		cancel:   cancel,
+	}
+	m.loops = append(m.loops, entry)
+	m.mu.Unlock()
+
+	go m.run(ctx, entry)
+	return id
+}
+
+// run executes the loop in a background goroutine.
+func (m *loopManager) run(ctx context.Context, entry *loopEntry) {
+	ticker := time.NewTicker(entry.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			start := time.Now()
+			result, err := m.rt.Exec(ctx, entry.Command, runtime.ExecOpts{
+				Timeout: 60 * time.Second,
+			})
+			elapsed := time.Since(start)
+
+			now := time.Now().Format("15:04:05")
+			if err != nil {
+				fmt.Fprintf(m.out, "\a[loop %s] %s — ERROR (%s): %s\n",
+					now, entry.Command, elapsed.Round(time.Millisecond), err.Error())
+				continue
+			}
+
+			if result.ExitCode == 0 {
+				fmt.Fprintf(m.out, "[loop %s] %s — PASS (%s)\n",
+					now, entry.Command, elapsed.Round(time.Millisecond))
+			} else {
+				// Bell character for failure notification.
+				stderr := strings.TrimSpace(result.Stderr)
+				if stderr == "" {
+					stderr = strings.TrimSpace(result.Stdout)
+				}
+				// Compact: show first 2 lines of output.
+				lines := strings.SplitN(stderr, "\n", 3)
+				summary := strings.Join(lines[:min(len(lines), 2)], "\n  → ")
+				fmt.Fprintf(m.out, "\a[loop %s] %s — FAIL (exit %d, %s)\n  → %s\n",
+					now, entry.Command, result.ExitCode, elapsed.Round(time.Millisecond), summary)
+			}
+		}
+	}
+}
+
+// StopAll cancels all running loops.
+func (m *loopManager) StopAll() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, entry := range m.loops {
+		if entry.cancel != nil {
+			entry.cancel()
+			count++
+		}
+	}
+	m.loops = nil
+	return count
+}
+
+// Status returns active loops.
+func (m *loopManager) Status() []*loopEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]*loopEntry, len(m.loops))
+	copy(cp, m.loops)
+	return cp
+}
+
+// handleLoop processes /loop commands.
+// /loop <duration> <command> — start a new loop.
+// /loop status — show active loops.
+// /loop off — stop all loops.
+func handleLoop(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/loop"))
+
+	if arg == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /loop <interval> <command>, /loop status, /loop off"))
+		return
+	}
+
+	if arg == "off" {
+		if state.loopMgr == nil {
+			fmt.Fprintln(state.out, ui.FormatHint("No active loops."))
+			return
+		}
+		count := state.loopMgr.StopAll()
+		fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Stopped %d loop(s).", count)))
+		return
+	}
+
+	if arg == "status" {
+		if state.loopMgr == nil || len(state.loopMgr.Status()) == 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("No active loops."))
+			return
+		}
+
+		headers := []string{"ID", "INTERVAL", "COMMAND"}
+		var rows [][]string
+		for _, entry := range state.loopMgr.Status() {
+			rows = append(rows, []string{
+				fmt.Sprintf("%d", entry.ID),
+				entry.Interval.String(),
+				entry.Command,
+			})
+		}
+		fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+		return
+	}
+
+	// Parse: <duration> <command>
+	parts := strings.SplitN(arg, " ", 2)
+	if len(parts) < 2 {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /loop <interval> <command>"))
+		return
+	}
+
+	interval, err := time.ParseDuration(parts[0])
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError(fmt.Sprintf("Invalid interval %q: %s", parts[0], err.Error())))
+		return
+	}
+
+	if interval < 1*time.Second {
+		fmt.Fprintln(state.out, ui.FormatWarning("Interval must be at least 1s."))
+		return
+	}
+
+	command := strings.TrimSpace(parts[1])
+	if command == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /loop <interval> <command>"))
+		return
+	}
+
+	if state.loopMgr == nil {
+		state.loopMgr = newLoopManager(state.rt, state.out)
+	}
+
+	id := state.loopMgr.Start(interval, command)
+	fmt.Fprintln(state.out, ui.FormatSuccess(
+		fmt.Sprintf("Loop #%d started: %q every %s", id, command, interval)))
+}
+
 func newChatCmd(runner *Runner) *cobra.Command {
 	var (
 		continueFlag bool
@@ -905,6 +1208,9 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				opts = append(opts, agent.WithSkills(skills))
 			}
 
+			// Load custom commands from .openmarmut/commands/.
+			customCmds, _ := agent.LoadCustomCommands(cmd.Context(), rt)
+
 			// Load ignore list from .openmarmutignore.
 			ignoreList := agent.LoadIgnoreList(cmd.Context(), rt)
 			if ignoreList != nil && len(ignoreList.Patterns()) > 0 {
@@ -963,6 +1269,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			state.cfg = cfg
 			state.log = log
 			state.mcpMgr = mcpMgr
+			state.customCommands = customCmds
 			if mcpMgr != nil {
 				defer mcpMgr.CloseAll()
 			}
@@ -1060,6 +1367,12 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					}
 				}
 
+				// Display custom commands if any.
+				if len(customCmds) > 0 {
+					fmt.Fprintln(os.Stderr, ui.FormatHint(
+						fmt.Sprintf("Custom commands: %d loaded (type /commands to list)", len(customCmds))))
+				}
+
 				// Warn about pre-existing uncommitted changes.
 				if state.isGitRepo {
 					warnDirtyState(cmd.Context(), rt, os.Stderr)
@@ -1088,12 +1401,23 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				action := handleSlashCommand(line, state)
 				switch action {
 				case slashExit:
+					// Stop background loops.
+					if state.loopMgr != nil {
+						state.loopMgr.StopAll()
+					}
 					// Extract memories and final save.
 					extractMemoriesOnExit(cmd.Context(), state)
 					saveSession(state)
 					return nil
 				case slashHandled:
-					continue
+					// Check if a custom command set content to send.
+					if state.customCmdContent != "" {
+						line = state.customCmdContent
+						state.customCmdContent = ""
+						// Fall through to send to agent.
+					} else {
+						continue
+					}
 				}
 
 				// Resolve @file references before sending to agent.
@@ -1199,6 +1523,10 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				fmt.Fprintln(os.Stderr)
 			}
 
+			// Stop background loops.
+			if state.loopMgr != nil {
+				state.loopMgr.StopAll()
+			}
 			// Extract memories and final save on EOF.
 			extractMemoriesOnExit(cmd.Context(), state)
 			saveSession(state)

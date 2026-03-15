@@ -911,3 +911,239 @@ func TestSlashCommands_NeverCallProvider_IncludesAgents(t *testing.T) {
 		})
 	}
 }
+
+// --- Custom Commands Tests ---
+
+func TestSlashCommands_ListEmpty(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/commands", state)
+
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No custom commands")
+}
+
+func TestSlashCommands_ListWithCommands(t *testing.T) {
+	state, buf := newTestState()
+	state.customCommands = []agent.CustomCommand{
+		{Name: "test", Description: "Run all tests"},
+		{Name: "review", Description: "Code review"},
+	}
+	action := handleSlashCommand("/commands", state)
+
+	assert.Equal(t, slashHandled, action)
+	output := buf.String()
+	assert.Contains(t, output, "/test")
+	assert.Contains(t, output, "Run all tests")
+	assert.Contains(t, output, "/review")
+}
+
+func TestTryCustomCommand_Found(t *testing.T) {
+	state, buf := newTestState()
+	state.customCommands = []agent.CustomCommand{
+		{Name: "test", Description: "Run tests", Content: "Run go test ./..."},
+	}
+
+	action := tryCustomCommand("/test", state)
+
+	assert.Equal(t, slashHandled, action)
+	assert.Equal(t, "Run go test ./...", state.customCmdContent)
+	assert.Contains(t, buf.String(), "Running custom command")
+}
+
+func TestTryCustomCommand_WithArgs(t *testing.T) {
+	state, _ := newTestState()
+	state.customCommands = []agent.CustomCommand{
+		{Name: "test", Description: "Run tests", Content: "Run go test"},
+	}
+
+	tryCustomCommand("/test src/auth/", state)
+	assert.Equal(t, "Run go test src/auth/", state.customCmdContent)
+}
+
+func TestTryCustomCommand_NotFound(t *testing.T) {
+	state, _ := newTestState()
+	state.customCommands = []agent.CustomCommand{
+		{Name: "test", Description: "Run tests", Content: "content"},
+	}
+
+	action := tryCustomCommand("/unknown", state)
+	assert.Equal(t, slashNone, action)
+	assert.Empty(t, state.customCmdContent)
+}
+
+func TestTryCustomCommand_NoCommands(t *testing.T) {
+	state, _ := newTestState()
+	action := tryCustomCommand("/test", state)
+	assert.Equal(t, slashNone, action)
+}
+
+// --- /btw Tests ---
+
+// btwProvider returns a fixed response for /btw tests.
+type btwProvider struct {
+	response string
+}
+
+func (p *btwProvider) Name() string  { return "btw-test" }
+func (p *btwProvider) Model() string { return "btw-model" }
+func (p *btwProvider) Complete(_ context.Context, _ llm.Request, _ llm.StreamCallback) (*llm.Response, error) {
+	return &llm.Response{Content: p.response, Usage: llm.Usage{TotalTokens: 50}}, nil
+}
+
+func TestSlashBtw_ShowsResponse(t *testing.T) {
+	rt := &stubRuntime{}
+	provider := &btwProvider{response: "Use fmt.Errorf with %w."}
+	ag := agent.New(&panicProvider{}, rt, testLogger)
+	var buf bytes.Buffer
+	state := &chatState{
+		ag:       ag,
+		provider: provider,
+		model:    "test-model",
+		out:      &buf,
+		rt:       rt,
+	}
+
+	handleBtw("/btw What is error wrapping?", state)
+
+	output := buf.String()
+	assert.Contains(t, output, "btw")
+	assert.Contains(t, output, "fmt.Errorf")
+}
+
+func TestSlashBtw_EmptyQuestion(t *testing.T) {
+	state, buf := newTestState()
+	handleBtw("/btw ", state)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashBtw_NoProvider(t *testing.T) {
+	state, buf := newTestState()
+	state.provider = nil
+	handleBtw("/btw test question", state)
+	assert.Contains(t, buf.String(), "No LLM provider")
+}
+
+func TestSlashBtw_NeverPollutesHistory(t *testing.T) {
+	rt := &stubRuntime{}
+	provider := &btwProvider{response: "answer"}
+	ag := agent.New(&panicProvider{}, rt, testLogger)
+	historyBefore := len(ag.History())
+	var buf bytes.Buffer
+	state := &chatState{
+		ag:       ag,
+		provider: provider,
+		model:    "test",
+		out:      &buf,
+		rt:       rt,
+	}
+
+	handleBtw("/btw test", state)
+	assert.Equal(t, historyBefore, len(ag.History()), "btw should not modify main history")
+}
+
+// --- /loop Tests ---
+
+func TestSlashLoop_EmptyArgs(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop", state)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashLoop_InvalidInterval(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop banana go test", state)
+	assert.Contains(t, buf.String(), "Invalid interval")
+}
+
+func TestSlashLoop_TooShortInterval(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop 100ms go test", state)
+	assert.Contains(t, buf.String(), "at least 1s")
+}
+
+func TestSlashLoop_MissingCommand(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop 5m", state)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashLoop_Start(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop 5m go test ./...", state)
+
+	output := buf.String()
+	assert.Contains(t, output, "Loop #1 started")
+	assert.Contains(t, output, "go test ./...")
+	assert.NotNil(t, state.loopMgr)
+
+	// Clean up.
+	state.loopMgr.StopAll()
+}
+
+func TestSlashLoop_StatusEmpty(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop status", state)
+	assert.Contains(t, buf.String(), "No active loops")
+}
+
+func TestSlashLoop_StatusWithEntry(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop 5m go test", state)
+
+	buf.Reset()
+	handleLoop("/loop status", state)
+	output := buf.String()
+	assert.Contains(t, output, "go test")
+	assert.Contains(t, output, "5m0s")
+
+	state.loopMgr.StopAll()
+}
+
+func TestSlashLoop_Off(t *testing.T) {
+	state, buf := newTestState()
+	handleLoop("/loop 5m go test", state)
+
+	buf.Reset()
+	handleLoop("/loop off", state)
+	assert.Contains(t, buf.String(), "Stopped 1 loop")
+
+	// After stopping, loops list is empty.
+	buf.Reset()
+	handleLoop("/loop status", state)
+	assert.Contains(t, buf.String(), "No active loops")
+}
+
+func TestSlashLoop_MultipleLoops(t *testing.T) {
+	state, _ := newTestState()
+	handleLoop("/loop 5m go test", state)
+	handleLoop("/loop 10s curl localhost", state)
+
+	loops := state.loopMgr.Status()
+	assert.Len(t, loops, 2)
+
+	count := state.loopMgr.StopAll()
+	assert.Equal(t, 2, count)
+}
+
+// --- Help includes new commands ---
+
+func TestSlashHelp_IncludesNewCommands(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/help", state)
+	output := buf.String()
+	assert.Contains(t, output, "/btw")
+	assert.Contains(t, output, "/loop")
+	assert.Contains(t, output, "/commands")
+}
+
+func TestSlashCommands_NeverCallProvider_IncludesNewCommands(t *testing.T) {
+	state, _ := newTestState()
+	newCommands := []string{"/commands", "/loop status", "/loop off"}
+	for _, cmd := range newCommands {
+		t.Run(cmd, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				handleSlashCommand(cmd, state)
+			}, "slash command %q should not call the LLM provider", cmd)
+		})
+	}
+}
