@@ -163,6 +163,9 @@ type Agent struct {
 	subAgentLogger       *slog.Logger
 	mcpManager           *mcp.Manager
 	taskList             *TaskList
+	hooks                []Hook
+	hooksEnabled         bool
+	sessionID            string
 }
 
 // Option configures the Agent.
@@ -242,6 +245,27 @@ func WithIgnoreList(il *IgnoreList) Option {
 func WithTaskList(tl *TaskList) Option {
 	return func(a *Agent) { a.taskList = tl }
 }
+
+// WithHooks sets the hooks for pre/post tool execution.
+func WithHooks(hooks []Hook, sessionID string) Option {
+	return func(a *Agent) {
+		a.hooks = hooks
+		a.hooksEnabled = true
+		a.sessionID = sessionID
+	}
+}
+
+// Hooks returns the agent's configured hooks.
+func (a *Agent) Hooks() []Hook { return a.hooks }
+
+// HooksEnabled returns whether hooks are currently enabled.
+func (a *Agent) HooksEnabled() bool { return a.hooksEnabled }
+
+// SetHooksEnabled toggles hooks on or off at runtime.
+func (a *Agent) SetHooksEnabled(enabled bool) { a.hooksEnabled = enabled }
+
+// SessionID returns the agent's session ID (used in hook payloads).
+func (a *Agent) SessionID() string { return a.sessionID }
 
 // WithExtendedThinking enables extended thinking / reasoning tokens.
 func WithExtendedThinking(enabled bool, budget int) Option {
@@ -408,6 +432,29 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 				a.onToolCall(tc)
 			}
 
+			// Run pre_tool hooks before permission check.
+			if a.hooksEnabled && len(a.hooks) > 0 {
+				hookPayload := HookPayload{
+					Tool:      tc.Name,
+					Arguments: json.RawMessage(redactedArgs),
+					Session:   a.sessionID,
+				}
+				if hookErr := RunHooks(ctx, a.hooks, "pre_tool", hookPayload, a.logger); hookErr != nil {
+					if errors.Is(hookErr, ErrHookAbort) {
+						step.Error = hookErr.Error()
+						step.Output = fmt.Sprintf("error: %s", hookErr.Error())
+						a.logger.Info("tool call blocked by pre_tool hook", "tool", tc.Name)
+						result.Steps = append(result.Steps, step)
+						a.history = append(a.history, llm.Message{
+							Role:       llm.RoleTool,
+							ToolCallID: tc.ID,
+							Content:    step.Output,
+						})
+						continue
+					}
+				}
+			}
+
 			// Check permissions before executing.
 			if a.permChecker != nil {
 				allowed, denyMsg := a.permChecker.Check(tc)
@@ -456,6 +503,17 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 					step.Output = output
 					a.logger.Debug("tool executed", "tool", tc.Name)
 				}
+			}
+
+			// Run post_tool hooks after execution.
+			if a.hooksEnabled && len(a.hooks) > 0 {
+				hookPayload := HookPayload{
+					Tool:      tc.Name,
+					Arguments: json.RawMessage(redactedArgs),
+					Result:    step.Output,
+					Session:   a.sessionID,
+				}
+				_ = RunHooks(ctx, a.hooks, "post_tool", hookPayload, a.logger)
 			}
 
 			result.Steps = append(result.Steps, step)
@@ -636,6 +694,16 @@ func (a *Agent) CompactHistory(ctx context.Context, customInstruction string) (b
 		return beforeTokens, beforeTokens, nil
 	}
 
+	// Run pre_compact hooks.
+	if a.hooksEnabled && len(a.hooks) > 0 {
+		payload := HookPayload{Session: a.sessionID}
+		if hookErr := RunHooks(ctx, a.hooks, "pre_compact", payload, a.logger); hookErr != nil {
+			if errors.Is(hookErr, ErrHookAbort) {
+				return beforeTokens, beforeTokens, hookErr
+			}
+		}
+	}
+
 	// Build the summarization prompt.
 	var sb strings.Builder
 	sb.WriteString("Summarize this conversation for context continuity. Preserve:\n")
@@ -698,6 +766,13 @@ func (a *Agent) CompactHistory(ctx context.Context, customInstruction string) (b
 	}
 
 	afterTokens = EstimateMessagesTokens(a.history)
+
+	// Run post_compact hooks.
+	if a.hooksEnabled && len(a.hooks) > 0 {
+		payload := HookPayload{Session: a.sessionID}
+		_ = RunHooks(ctx, a.hooks, "post_compact", payload, a.logger)
+	}
+
 	return beforeTokens, afterTokens, nil
 }
 

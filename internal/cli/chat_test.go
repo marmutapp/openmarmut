@@ -1336,3 +1336,117 @@ func TestPhase12_4_SlashCommands_NoLLMCall(t *testing.T) {
 		})
 	}
 }
+
+// --- Phase 13.1: Hooks Tests ---
+
+func TestSlashHooks_NoHooks(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/hooks", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No hooks configured")
+}
+
+func TestSlashHooks_ListHooks(t *testing.T) {
+	state, buf := newTestState()
+	state.hooks = []agent.Hook{
+		{Name: "audit", Event: "post_tool", Type: "shell", Command: "echo log", OnError: "continue"},
+		{Name: "guard", Event: "pre_tool", Type: "http", URL: "https://example.com", OnError: "abort", Tools: []string{"write_file"}},
+	}
+	action := handleSlashCommand("/hooks", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "audit")
+	assert.Contains(t, buf.String(), "guard")
+	assert.Contains(t, buf.String(), "post_tool")
+	assert.Contains(t, buf.String(), "pre_tool")
+}
+
+func TestSlashHooks_Off(t *testing.T) {
+	state, buf := newTestState()
+	state.hooks = []agent.Hook{{Name: "h", Event: "pre_tool", Type: "shell", Command: "true", OnError: "continue"}}
+	// Agent needs hooks enabled.
+	rt := &stubRuntime{}
+	state.ag = agent.New(&panicProvider{}, rt, testLogger,
+		agent.WithHooks(state.hooks, "sess"))
+
+	action := handleSlashCommand("/hooks off", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "disabled")
+	assert.False(t, state.ag.HooksEnabled())
+}
+
+func TestSlashHooks_On(t *testing.T) {
+	state, buf := newTestState()
+	state.hooks = []agent.Hook{{Name: "h", Event: "pre_tool", Type: "shell", Command: "true", OnError: "continue"}}
+	rt := &stubRuntime{}
+	state.ag = agent.New(&panicProvider{}, rt, testLogger,
+		agent.WithHooks(state.hooks, "sess"))
+	state.ag.SetHooksEnabled(false)
+
+	action := handleSlashCommand("/hooks on", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "re-enabled")
+	assert.True(t, state.ag.HooksEnabled())
+}
+
+func TestSlashHooks_OnNoHooks(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/hooks on", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No hooks configured")
+}
+
+func TestSlashHooks_DisabledWarning(t *testing.T) {
+	state, buf := newTestState()
+	state.hooks = []agent.Hook{{Name: "h", Event: "pre_tool", Type: "shell", Command: "true", OnError: "continue"}}
+	rt := &stubRuntime{}
+	state.ag = agent.New(&panicProvider{}, rt, testLogger,
+		agent.WithHooks(state.hooks, "sess"))
+	state.ag.SetHooksEnabled(false)
+
+	action := handleSlashCommand("/hooks", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "disabled")
+}
+
+func TestSlashHooks_TestInvalidIndex(t *testing.T) {
+	state, buf := newTestState()
+	state.hooks = []agent.Hook{{Name: "h", Event: "pre_tool", Type: "shell", Command: "true", OnError: "continue"}}
+
+	action := handleSlashCommand("/hooks test 5", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashHooks_TestSuccess(t *testing.T) {
+	state, buf := newTestState()
+	state.hooks = []agent.Hook{
+		{Name: "echo-hook", Event: "pre_tool", Type: "shell", Command: "cat > /dev/null", OnError: "continue"},
+	}
+	state.log = testLogger
+
+	action := handleSlashCommand("/hooks test 0", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "passed")
+}
+
+func TestSlashHooks_NoLLMCall(t *testing.T) {
+	state, _ := newTestState()
+	state.hooks = []agent.Hook{{Name: "h", Event: "pre_tool", Type: "shell", Command: "true", OnError: "continue"}}
+	state.log = testLogger
+
+	commands := []string{"/hooks", "/hooks on", "/hooks off"}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				handleSlashCommand(cmd, state)
+			})
+		})
+	}
+}
+
+func TestHelpIncludesHooks(t *testing.T) {
+	var buf bytes.Buffer
+	renderHelpBox(&buf)
+	assert.Contains(t, buf.String(), "/hooks")
+	assert.Contains(t, buf.String(), "test")
+}

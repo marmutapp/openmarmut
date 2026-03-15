@@ -454,6 +454,26 @@
 - [x] `internal/cli/chat_test.go` — 20 new tests (commands list empty/with entries, custom command found/args/not found/no commands, btw response/empty/no provider/history isolation, loop empty/invalid/short/missing cmd/start/status empty/status entry/off/multiple, help includes new, never call provider)
 - [x] All 19 packages pass
 
+## Phase 13: Extensibility
+
+### Phase 13.1: Hooks System
+- [x] `internal/agent/hooks.go` — Hook struct, HookPayload, LoadHooks, RunHooks, runShellHook, runHTTPHook
+- [x] Shell hooks: sh -c execution, JSON payload via stdin, OPENMARMUT_EVENT/TOOL/SESSION env vars
+- [x] HTTP hooks: POST JSON payload, custom headers with env var interpolation, abort response parsing
+- [x] Hook events: pre_tool, post_tool, pre_session, post_session, pre_compact, post_compact
+- [x] Tool filtering: hooks can target specific tools via `tools` list (empty = all)
+- [x] Error handling: on_error "continue" (default) or "abort" (cancels tool call)
+- [x] `internal/config/config.go` — HookConfig struct, `hooks` YAML list in Config
+- [x] `internal/agent/agent.go` — WithHooks option, hooks/hooksEnabled/sessionID fields, pre/post tool hooks in Run loop, pre/post compact hooks
+- [x] `internal/cli/chat.go` — LoadHooks on startup, /hooks slash command (list/on/off/test), pre/post session hooks, hooks status on chat start
+- [x] /hooks test <n> — test-fire a hook with sample payload
+- [x] /help updated with /hooks entries
+- [x] FormatHooksList — human-readable hook display
+- [x] ErrHookAbort — sentinel error for abort flow
+- [x] `internal/agent/hooks_test.go` — 22 tests (loading, validation, shell success/fail/abort/env/stdin, HTTP success/abort/error/headers, tool filter, event filter, multiple hooks, abort stops subsequent, interpolation, format list, session/compact events, defaults, valid events)
+- [x] `internal/cli/chat_test.go` — 11 new tests (no hooks, list hooks, off/on/on-no-hooks, disabled warning, test invalid/success, no LLM call, help includes hooks)
+- [x] All 19 packages pass
+
 ---
 
 ## Completion Criteria
@@ -517,5 +537,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 12.4 | Task tracking, background execution, multi-model switching. (1) Task tracking — TaskList with JSON persistence, 3 agent tools (task_create/update/list as PermAuto), /tasks slash command (add/done/clear), task_list in readOnlyTools; (2) Background execution — /bg spawns sub-agent in goroutine, /bg status, /bg cancel; (3) Multi-model switching — /model (show/switch), /provider (switch), session persistence on switch. 18 agent tests + 15 chat tests. All 19 packages pass. | Done
 
 2026-03-15 | Docs | Comprehensive test suite (docs/full-test-suite.md) covering all 14 feature areas across Phases 1–12: core runtime, LLM providers, agent loop, chat REPL, session persistence, project memory, plan mode, git integration, context management, sub-agents, MCP, advanced features, UI/UX, configuration. 90+ manual tests, 550+ unit tests referenced. All 19 packages pass, binary builds clean. | Done
+
+2026-03-15 | Phase 13.1 | Hooks system: internal/agent/hooks.go with shell (sh -c, stdin payload, env vars) and HTTP (POST JSON, abort response, custom headers with env interpolation) hook types. 6 events (pre/post tool, session, compact), tool filtering, on_error abort/continue. HookConfig in config.go, WithHooks agent option, pre/post hooks wired into agent Run loop and CompactHistory. /hooks slash command (list/on/off/test), pre/post session hooks in chat lifecycle, hooks status on startup. 22 agent tests + 11 chat tests. All 19 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->

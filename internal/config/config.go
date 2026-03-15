@@ -22,6 +22,20 @@ type Config struct {
 	LLM            LLMConfig     `yaml:"llm"`
 	Agent          AgentConfig   `yaml:"agent"`
 	MCP            MCPConfig     `yaml:"mcp"`
+	Hooks          []HookConfig  `yaml:"hooks"`
+}
+
+// HookConfig holds the YAML configuration for a single hook.
+type HookConfig struct {
+	Name    string            `yaml:"name"`
+	Event   string            `yaml:"event"`
+	Tools   []string          `yaml:"tools"`
+	Type    string            `yaml:"type"`
+	Command string            `yaml:"command"`
+	URL     string            `yaml:"url"`
+	Headers map[string]string `yaml:"headers"`
+	Timeout time.Duration     `yaml:"timeout"`
+	OnError string            `yaml:"on_error"`
 }
 
 // MCPConfig holds MCP server configuration.

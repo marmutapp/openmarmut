@@ -64,6 +64,7 @@ type chatState struct {
 	bgJobs           []*bgJob         // background execution jobs.
 	bgMu             sync.Mutex       // protects bgJobs.
 	bgNextID         int              // next background job ID.
+	hooks            []agent.Hook     // configured hooks.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -170,6 +171,11 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return slashHandled
 	}
 
+	if strings.HasPrefix(line, "/hooks") {
+		handleHooks(line, state)
+		return slashHandled
+	}
+
 	if strings.HasPrefix(line, "/model") {
 		handleModel(line, state)
 		return slashHandled
@@ -270,6 +276,9 @@ func renderHelpBox(w io.Writer) {
 		{"/model", "Show current model"},
 		{"/model <name>", "Switch model for this session"},
 		{"/provider <name>", "Switch provider for this session"},
+		{"/hooks", "List configured hooks"},
+		{"/hooks on|off", "Enable/disable hooks for this session"},
+		{"/hooks test <n>", "Test-fire a hook by index"},
 		{"/commands", "List custom commands from .openmarmut/commands/"},
 		{"/sessions", "List recent sessions"},
 		{"/rename <name>", "Rename current session"},
@@ -693,6 +702,65 @@ func interactiveConfirm(state *chatState) agent.ConfirmFunc {
 		default:
 			return agent.ConfirmNo
 		}
+	}
+}
+
+// handleHooks processes /hooks commands.
+// /hooks          — list all configured hooks
+// /hooks test <n> — test-fire a hook with sample payload
+// /hooks off      — disable hooks for this session
+// /hooks on       — re-enable hooks
+func handleHooks(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/hooks"))
+
+	switch {
+	case arg == "" || arg == " ":
+		if len(state.hooks) == 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("No hooks configured. Add hooks to .openmarmut.yaml"))
+			return
+		}
+		fmt.Fprintln(state.out, ui.RenderBox("Hooks", agent.FormatHooksList(state.hooks)))
+		if !state.ag.HooksEnabled() {
+			fmt.Fprintln(state.out, ui.FormatWarning("Hooks are currently disabled for this session."))
+		}
+
+	case arg == "off":
+		state.ag.SetHooksEnabled(false)
+		fmt.Fprintln(state.out, ui.FormatSuccess("Hooks disabled for this session."))
+
+	case arg == "on":
+		if len(state.hooks) == 0 {
+			fmt.Fprintln(state.out, ui.FormatWarning("No hooks configured."))
+			return
+		}
+		state.ag.SetHooksEnabled(true)
+		fmt.Fprintln(state.out, ui.FormatSuccess("Hooks re-enabled."))
+
+	case strings.HasPrefix(arg, "test "):
+		idxStr := strings.TrimSpace(strings.TrimPrefix(arg, "test "))
+		idx, parseErr := strconv.Atoi(idxStr)
+		if parseErr != nil || idx < 0 || idx >= len(state.hooks) {
+			fmt.Fprintln(state.out, ui.FormatWarning(
+				fmt.Sprintf("Usage: /hooks test <index> (0-%d)", len(state.hooks)-1)))
+			return
+		}
+		h := state.hooks[idx]
+		payload := agent.HookPayload{
+			Tool:      "test_tool",
+			Arguments: json.RawMessage(`{"test": true}`),
+			Session:   state.ag.SessionID(),
+		}
+		fmt.Fprintf(state.out, "Testing hook %q (%s)...\n", h.Name, h.Type)
+		testHooks := []agent.Hook{h}
+		err := agent.RunHooks(context.Background(), testHooks, h.Event, payload, state.log)
+		if err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Hook test failed: "+err.Error()))
+		} else {
+			fmt.Fprintln(state.out, ui.FormatSuccess("Hook test passed."))
+		}
+
+	default:
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /hooks, /hooks on, /hooks off, /hooks test <index>"))
 	}
 }
 
@@ -1595,6 +1663,12 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			// Enable sub-agent spawning via tool call.
 			opts = append(opts, agent.WithSubAgentProvider(provider, log))
 
+			// Load hooks from config.
+			hooks, hookErr := agent.LoadHooks(cfg)
+			if hookErr != nil {
+				fmt.Fprintln(os.Stderr, ui.FormatWarning("Hooks: "+hookErr.Error()))
+			}
+
 			// Pre-generate session ID for task list.
 			preSessionID := session.NewID()
 			taskList := agent.NewTaskList(preSessionID)
@@ -1631,6 +1705,11 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				}
 			}
 
+			// Wire hooks into agent.
+			if len(hooks) > 0 {
+				opts = append(opts, agent.WithHooks(hooks, preSessionID))
+			}
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			state.ag = ag
@@ -1645,6 +1724,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			state.mcpMgr = mcpMgr
 			state.customCommands = customCmds
 			state.taskList = taskList
+			state.hooks = hooks
 			if mcpMgr != nil {
 				defer mcpMgr.CloseAll()
 			}
@@ -1755,6 +1835,21 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			}
 
 			state.sess = sess
+
+			// Run pre_session hooks.
+			if ag.HooksEnabled() && len(hooks) > 0 {
+				payload := agent.HookPayload{Session: preSessionID}
+				if hookErr := agent.RunHooks(cmd.Context(), hooks, "pre_session", payload, log); hookErr != nil {
+					fmt.Fprintln(os.Stderr, ui.FormatWarning("pre_session hook: "+hookErr.Error()))
+				}
+			}
+
+			// Display hooks status on chat start.
+			if len(hooks) > 0 {
+				fmt.Fprintln(os.Stderr, ui.FormatHint(
+					fmt.Sprintf("Hooks: %d configured (type /hooks to list)", len(hooks))))
+			}
+
 			fmt.Fprintln(os.Stderr)
 
 			for {
@@ -1780,6 +1875,8 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					if state.loopMgr != nil {
 						state.loopMgr.StopAll()
 					}
+					// Run post_session hooks.
+					runPostSessionHooks(cmd.Context(), state, log)
 					// Extract memories and final save.
 					extractMemoriesOnExit(cmd.Context(), state)
 					saveSession(state)
@@ -1902,6 +1999,8 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			if state.loopMgr != nil {
 				state.loopMgr.StopAll()
 			}
+			// Run post_session hooks.
+			runPostSessionHooks(cmd.Context(), state, log)
 			// Extract memories and final save on EOF.
 			extractMemoriesOnExit(cmd.Context(), state)
 			saveSession(state)
@@ -1950,6 +2049,16 @@ func resolveResumeID(continueFlag bool, resumeFlag string, targetDir string, sca
 }
 
 // saveSession persists the current session state to disk.
+// runPostSessionHooks fires post_session hooks if enabled.
+func runPostSessionHooks(ctx context.Context, state *chatState, log *slog.Logger) {
+	if state.ag.HooksEnabled() && len(state.hooks) > 0 {
+		payload := agent.HookPayload{Session: state.ag.SessionID()}
+		if err := agent.RunHooks(ctx, state.hooks, "post_session", payload, log); err != nil {
+			fmt.Fprintln(state.out, ui.FormatWarning("post_session hook: "+err.Error()))
+		}
+	}
+}
+
 func saveSession(state *chatState) {
 	if state.sess == nil {
 		return
