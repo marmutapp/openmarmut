@@ -98,13 +98,14 @@ func (p *Provider) Complete(ctx context.Context, req llm.Request, cb llm.StreamC
 // --- Request Building ---
 
 type chatRequest struct {
-	Model         string        `json:"model"`
-	Messages      []chatMessage `json:"messages"`
-	Temperature   *float64      `json:"temperature,omitempty"`
-	MaxTokens     *int          `json:"max_tokens,omitempty"`
-	Stream        bool          `json:"stream"`
-	StreamOptions *streamOpts   `json:"stream_options,omitempty"`
-	Tools         []chatTool    `json:"tools,omitempty"`
+	Model            string        `json:"model"`
+	Messages         []chatMessage `json:"messages"`
+	Temperature      *float64      `json:"temperature,omitempty"`
+	MaxTokens        *int          `json:"max_tokens,omitempty"`
+	Stream           bool          `json:"stream"`
+	StreamOptions    *streamOpts   `json:"stream_options,omitempty"`
+	Tools            []chatTool    `json:"tools,omitempty"`
+	ReasoningEffort  string        `json:"reasoning_effort,omitempty"`
 }
 
 type streamOpts struct {
@@ -159,6 +160,11 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 		cr.Temperature = req.Temperature
 	} else if p.defTemp != nil {
 		cr.Temperature = p.defTemp
+	}
+
+	// Extended thinking: for o-series models, use reasoning_effort.
+	if req.ExtendedThinking {
+		cr.ReasoningEffort = budgetToEffort(req.ThinkingBudget)
 	}
 
 	// Convert messages.
@@ -352,6 +358,20 @@ func (p *Provider) parseSSEStream(body io.Reader, cb llm.StreamCallback) (*llm.R
 	}
 
 	return result, nil
+}
+
+// budgetToEffort maps a thinking budget to OpenAI reasoning_effort level.
+func budgetToEffort(budget int) string {
+	switch {
+	case budget <= 0:
+		return "medium"
+	case budget <= 5000:
+		return "low"
+	case budget <= 20000:
+		return "medium"
+	default:
+		return "high"
+	}
 }
 
 func mapStopReason(reason string) string {

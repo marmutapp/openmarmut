@@ -102,13 +102,19 @@ func (p *Provider) Complete(ctx context.Context, req llm.Request, cb llm.StreamC
 
 // apiRequest is the Anthropic Messages API request body.
 type apiRequest struct {
-	Model       string       `json:"model"`
-	Messages    []apiMessage `json:"messages"`
-	System      string       `json:"system,omitempty"`
-	MaxTokens   int          `json:"max_tokens"`
-	Temperature *float64     `json:"temperature,omitempty"`
-	Stream      bool         `json:"stream"`
-	Tools       []apiToolDef `json:"tools,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []apiMessage    `json:"messages"`
+	System      string          `json:"system,omitempty"`
+	MaxTokens   int             `json:"max_tokens"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	Stream      bool            `json:"stream"`
+	Tools       []apiToolDef    `json:"tools,omitempty"`
+	Thinking    *thinkingConfig `json:"thinking,omitempty"`
+}
+
+type thinkingConfig struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 type apiMessage struct {
@@ -152,6 +158,20 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 		ar.Temperature = req.Temperature
 	} else if p.defTemp != nil {
 		ar.Temperature = p.defTemp
+	}
+
+	// Extended thinking: adds a thinking block with budget.
+	if req.ExtendedThinking {
+		budget := req.ThinkingBudget
+		if budget <= 0 {
+			budget = 10000
+		}
+		ar.Thinking = &thinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: budget,
+		}
+		// Anthropic requires temperature to be unset (or 1) with thinking.
+		ar.Temperature = nil
 	}
 
 	// Convert messages. System messages become the top-level system field.
@@ -253,6 +273,7 @@ func (p *Provider) parseSSEStream(body io.Reader, cb llm.StreamCallback) (*llm.R
 	}
 	var activeTools []toolAccum
 	var currentToolIdx int = -1
+	var inThinking bool
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -287,6 +308,8 @@ func (p *Provider) parseSSEStream(body io.Reader, cb llm.StreamCallback) (*llm.R
 						name: event.ContentBlock.Name,
 					})
 					currentToolIdx = len(activeTools) - 1
+				case "thinking":
+					inThinking = true
 				}
 			}
 
@@ -300,6 +323,8 @@ func (p *Provider) parseSSEStream(body io.Reader, cb llm.StreamCallback) (*llm.R
 							return nil, fmt.Errorf("anthropic.Complete: %w: %w", llm.ErrStreamAborted, err)
 						}
 					}
+				case "thinking_delta":
+					result.Thinking += event.Delta.Thinking
 				case "input_json_delta":
 					if currentToolIdx >= 0 && currentToolIdx < len(activeTools) {
 						activeTools[currentToolIdx].input.WriteString(event.Delta.PartialJSON)
@@ -308,7 +333,9 @@ func (p *Provider) parseSSEStream(body io.Reader, cb llm.StreamCallback) (*llm.R
 			}
 
 		case "content_block_stop":
-			// Tool block finished — nothing to do, already accumulated.
+			if inThinking {
+				inThinking = false
+			}
 
 		case "message_delta":
 			if event.Delta != nil {
@@ -375,6 +402,7 @@ type sseCB struct {
 type sseDelta struct {
 	Type        string `json:"type"`
 	Text        string `json:"text,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 	StopReason  string `json:"stop_reason,omitempty"`
 }

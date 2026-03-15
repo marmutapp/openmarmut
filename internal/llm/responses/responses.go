@@ -114,13 +114,18 @@ func hasPath(endpoint string) bool {
 // --- Request Building ---
 
 type apiRequest struct {
-	Model           string     `json:"model"`
-	Input           any        `json:"input"`
-	Instructions    string     `json:"instructions,omitempty"`
-	Temperature     *float64   `json:"temperature,omitempty"`
-	MaxOutputTokens *int       `json:"max_output_tokens,omitempty"`
-	Stream          bool       `json:"stream"`
-	Tools           []apiTool  `json:"tools,omitempty"`
+	Model           string           `json:"model"`
+	Input           any              `json:"input"`
+	Instructions    string           `json:"instructions,omitempty"`
+	Temperature     *float64         `json:"temperature,omitempty"`
+	MaxOutputTokens *int             `json:"max_output_tokens,omitempty"`
+	Stream          bool             `json:"stream"`
+	Tools           []apiTool        `json:"tools,omitempty"`
+	Reasoning       *reasoningConfig `json:"reasoning,omitempty"`
+}
+
+type reasoningConfig struct {
+	Effort string `json:"effort"`
 }
 
 type inputItem struct {
@@ -157,6 +162,13 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 		ar.Temperature = req.Temperature
 	} else if p.defTemp != nil {
 		ar.Temperature = p.defTemp
+	}
+
+	// Extended thinking: Responses API uses reasoning.effort.
+	if req.ExtendedThinking {
+		ar.Reasoning = &reasoningConfig{
+			Effort: budgetToEffort(req.ThinkingBudget),
+		}
 	}
 
 	var items []inputItem
@@ -216,6 +228,20 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 	}
 
 	return json.Marshal(ar)
+}
+
+// budgetToEffort maps a thinking budget to reasoning effort level.
+func budgetToEffort(budget int) string {
+	switch {
+	case budget <= 0:
+		return "medium"
+	case budget <= 5000:
+		return "low"
+	case budget <= 20000:
+		return "medium"
+	default:
+		return "high"
+	}
 }
 
 // --- SSE Stream Parsing ---

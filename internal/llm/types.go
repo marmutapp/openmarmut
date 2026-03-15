@@ -26,18 +26,22 @@ type StreamCallback func(text string) error
 
 // Request is a single completion request.
 type Request struct {
-	Messages    []Message
-	Tools       []ToolDef
-	Temperature *float64 // nil = provider entry default
-	MaxTokens   *int     // nil = provider entry default
+	Messages         []Message
+	Tools            []ToolDef
+	Temperature      *float64 // nil = provider entry default
+	MaxTokens        *int     // nil = provider entry default
+	ExtendedThinking bool     // Enable extended thinking / reasoning tokens.
+	ThinkingBudget   int      // Max thinking tokens (0 = provider default).
 }
 
 // Response is the result of a completion.
 type Response struct {
-	Content    string     // Text content (may be empty if only tool calls)
-	ToolCalls  []ToolCall // Zero or more tool invocations requested by the model
-	Usage      Usage      // Token counts
-	StopReason string     // "end", "tool_use", "max_tokens"
+	Content        string     // Text content (may be empty if only tool calls)
+	Thinking       string     // Reasoning/thinking content (if extended thinking enabled)
+	ToolCalls      []ToolCall // Zero or more tool invocations requested by the model
+	Usage          Usage      // Token counts
+	ThinkingTokens int        // Tokens used for thinking/reasoning
+	StopReason     string     // "end", "tool_use", "max_tokens"
 }
 
 // Message is a single message in the conversation.
@@ -91,9 +95,11 @@ type ProviderEntry struct {
 	Auth          AuthConfig        `yaml:"auth"`           // How to authenticate requests
 	PayloadConfig json.RawMessage   `yaml:"payload_config"` // Type-specific overrides (custom type: full template)
 	ResponsePath  string            `yaml:"response_path"`  // JSONPath-like for custom type response extraction
-	Temperature   *float64          `yaml:"temperature"`      // Default temperature (nil = provider default)
-	MaxTokens     *int              `yaml:"max_tokens"`       // Default max tokens (nil = provider default)
-	ContextWindow int              `yaml:"context_window"`   // Model context window in tokens (default: 128000)
+	Temperature      *float64          `yaml:"temperature"`        // Default temperature (nil = provider default)
+	MaxTokens        *int              `yaml:"max_tokens"`         // Default max tokens (nil = provider default)
+	ContextWindow    int               `yaml:"context_window"`     // Model context window in tokens (default: 128000)
+	ExtendedThinking bool              `yaml:"extended_thinking"`  // Enable extended thinking / reasoning tokens
+	ThinkingBudget   int               `yaml:"thinking_budget"`    // Max thinking tokens (0 = provider default)
 }
 
 // AuthConfig describes how to authenticate with an endpoint.

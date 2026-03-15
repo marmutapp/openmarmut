@@ -142,6 +142,14 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 		payload["temperature"] = *p.defTemp
 	}
 
+	// Extended thinking: pass through as generic fields for custom endpoints.
+	if req.ExtendedThinking {
+		payload["extended_thinking"] = true
+		if req.ThinkingBudget > 0 {
+			payload["thinking_budget"] = req.ThinkingBudget
+		}
+	}
+
 	// Convert messages.
 	var messages []map[string]any
 	for _, msg := range req.Messages {

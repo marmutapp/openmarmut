@@ -127,8 +127,13 @@ type systemInstr struct {
 }
 
 type generationCfg struct {
-	Temperature    *float64 `json:"temperature,omitempty"`
-	MaxOutputTokens *int    `json:"maxOutputTokens,omitempty"`
+	Temperature     *float64       `json:"temperature,omitempty"`
+	MaxOutputTokens *int           `json:"maxOutputTokens,omitempty"`
+	ThinkingConfig  *thinkingCfg   `json:"thinkingConfig,omitempty"`
+}
+
+type thinkingCfg struct {
+	ThinkingBudget int `json:"thinkingBudget,omitempty"`
 }
 
 type toolDecls struct {
@@ -161,6 +166,16 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 		gc.MaxOutputTokens = p.defMax
 		hasGC = true
 	}
+	// Extended thinking: Gemini uses thinkingConfig in generationConfig.
+	if req.ExtendedThinking {
+		budget := req.ThinkingBudget
+		if budget <= 0 {
+			budget = 10000
+		}
+		gc.ThinkingConfig = &thinkingCfg{ThinkingBudget: budget}
+		hasGC = true
+	}
+
 	if hasGC {
 		ar.GenerationConfig = &gc
 	}
