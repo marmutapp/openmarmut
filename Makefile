@@ -2,7 +2,7 @@ BINARY := openmarmut
 MODULE := github.com/marmutapp/openmarmut
 GOFLAGS ?=
 
-.PHONY: build test lint integration-test clean fmt vet
+.PHONY: build test lint integration-test clean fmt vet install release release-dry
 
 build:
 	go build $(GOFLAGS) -o $(BINARY) ./cmd/openmarmut
@@ -21,6 +21,15 @@ vet:
 
 integration-test:
 	go test ./internal/dockerrt/ -tags "integration,docker" -v -count=1 -timeout 120s
+
+install:
+	go install ./cmd/openmarmut
+
+release-dry:
+	goreleaser release --snapshot --clean
+
+release:
+	goreleaser release --clean
 
 clean:
 	rm -f $(BINARY)

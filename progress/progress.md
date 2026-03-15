@@ -529,6 +529,23 @@
 - [x] `internal/cli/chat_test.go` — 5 new tests (help categorized, /pr not git, /pr handled, /pr open, /pr checks)
 - [x] All 19 packages pass
 
+## Phase 14: Release Packaging
+
+- [x] Module path updated to `github.com/marmutapp/openmarmut`
+- [x] All import statements updated across 85+ Go files
+- [x] Version info — `var version, commit, date` set by ldflags, `VersionString()` helper
+- [x] `--version` flag on root command
+- [x] `/version` slash command in chat
+- [x] LICENSE — MIT, copyright 2026 Gaja AI Private Limited
+- [x] `.goreleaser.yml` — 5 platform builds, tar.gz/zip, SHA256 checksums, changelog
+- [x] `install.sh` — OS/arch detection, download from GitHub Releases, SHA256 verification
+- [x] `Makefile` — added `install`, `release-dry`, `release` targets
+- [x] `.github/workflows/ci.yml` — lint (golangci-lint), test (Go 1.22/1.23 matrix), build
+- [x] `.github/workflows/release.yml` — goreleaser on tag push (v*)
+- [x] `README.md` — comprehensive rewrite with installation, configuration examples, slash commands table, config reference, env vars
+- [x] `progress/progress.md` — Phase 14 items tracked
+- [x] All 19 packages pass
+
 ---
 
 ## Completion Criteria
@@ -602,5 +619,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 13.4 | PR status display, key bindings, and final polish: PRDetector with gh CLI integration (detect/checks/open), inputHistory with file persistence and navigation, enhanced welcome banner with BannerInfo (branch, PR status color-coded, session, instructions, rules/skills counts), categorized /help with 7 groups, /pr slash command (/pr, /pr open, /pr checks), CurrentBranch helper. 5 PR tests + 7 history tests + 2 banner tests + 5 chat tests. All 19 packages pass. Phase 13 complete. | Done
 
 2026-03-15 | Docs | Updated full-test-suite.md for Phases 12-13: added sections 15-20 (hooks, image input, agent teams, PR status, input history, key bindings), fixed exec exit code docs, updated test matrix (640+ unit, 110+ manual). Verified all 19 packages pass, binary builds clean. Ran Section 1 (core runtime) and Section 2 (LLM providers) manually — all non-live-API tests pass. | Done
+
+2026-03-15 | Phase 14 | Release packaging: module path updated to github.com/marmutapp/openmarmut (85+ files), version info with ldflags (--version flag + /version command), MIT LICENSE, .goreleaser.yml (5 platforms, checksums, changelog), install.sh (OS/arch detection, SHA256 verification), Makefile targets (install/release/release-dry), GitHub Actions CI (lint+test matrix+build) and release (goreleaser on v* tags), comprehensive README rewrite. All 19 packages pass. | Push to GitHub
 
 <!-- Claude: append a new line here after each working session -->
