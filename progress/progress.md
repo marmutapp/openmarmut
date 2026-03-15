@@ -294,6 +294,87 @@
 - [x] `internal/cli/filerefs_test.go` — 13 new tests (file resolution, directory, missing, duplicate, pattern matching, lookupLang)
 - [x] All 18 packages pass
 
+## Phase 11.5: Project Memory, Rules, Skills, Auto-Memory, and Ignore System
+
+### Feature 1: OPENMARMUT.md Project Instructions
+- [x] `internal/agent/memory.go` — LoadProjectInstructions: search OPENMARMUT.md/openmarmut.md/.openmarmut.md in target dir via Runtime
+- [x] Ancestor loading — walk up from target dir, load every OPENMARMUT.md found (root first → most specific last)
+- [x] Global instructions — ~/.openmarmut/OPENMARMUT.md
+- [x] Merge order: global → ancestors (root first) → project
+- [x] @ import support — resolve @path lines within OPENMARMUT.md (up to 5 levels, deduplicated)
+- [x] Content cap at 10,000 chars with truncation warning
+- [x] `WithProjectInstructions` agent option, prepended to system prompt
+- [x] Wired into chat.go and ask.go
+- [x] Display on chat start — "Instructions: OPENMARMUT.md (N lines)" or "No OPENMARMUT.md found"
+- [x] 16 tests (loading, case-insensitive, dot prefix, priority, truncation, ancestor, imports, dedup, recursive, max depth, global, inline refs)
+
+### Feature 2: Rules System (.openmarmut/rules/)
+- [x] `internal/agent/rules.go` — Rule struct, LoadRules, parseRule, parseGlobs
+- [x] Frontmatter parsing: globs (inline array and multi-line list)
+- [x] MatchRules — glob matching with ** support (matchDoublestar)
+- [x] ExtractRecentFilePaths — extract file paths from recent tool call arguments
+- [x] Dynamic rule activation — refreshActiveRules updates system prompt before each LLM call
+- [x] `WithRules` agent option, wired into chat.go and ask.go
+- [x] `/rules` slash command — shows loaded rules, glob patterns, active status
+- [x] 22 tests (loading, frontmatter, globs, matching, extract paths, parse formats)
+
+### Feature 3: Skills System (.openmarmut/skills/)
+- [x] `internal/agent/skills.go` — Skill struct, LoadSkills, parseSkill, FindSkill
+- [x] Frontmatter: description, trigger (manual/auto)
+- [x] Auto skills — descriptions in system prompt (2% context window budget)
+- [x] Manual skills — invoked via /skill command, content prepended to next message
+- [x] `WithSkills` agent option, wired into chat.go
+- [x] `/skill` slash command — list skills or invoke by name
+- [x] `pendingSkill` state in chatState for deferred skill application
+- [x] 12 tests (loading, frontmatter, find, auto descriptions, budget, unterminated)
+
+### Feature 4: Auto-Memory
+- [x] `internal/agent/automemory.go` — MemoryStore, MemoryEntry, Save/Load/Clear
+- [x] Storage: ~/.openmarmut/memory/MEMORY.md (append-only)
+- [x] Per-project tagging: `- [YYYY-MM-DD] project:/path | category | content` or `- [YYYY-MM-DD] global | category | content`
+- [x] `SaveWithProject(project, category, content)` — project-scoped memory entries
+- [x] `EntriesForProject(targetDir)` — filter entries by project path (exact + subdirectory match)
+- [x] `FormatForPrompt()` — all memories in system prompt (capped at 5,000 chars)
+- [x] `FormatForPromptFiltered(targetDir)` — project-filtered memories for system prompt
+- [x] `ExtractMemories(ctx, provider, history, targetDir, existingContent)` — LLM-based memory extraction from conversation
+- [x] `parseExtractedMemories(content)` — parses `- ` prefixed lines, handles "NONE"
+- [x] `entryMatchesProject(entry, targetDir)` — proper path prefix matching with separator check
+- [x] `NewMemoryStoreWithPath(customPath)` — config-based custom path
+- [x] Config: `agent.auto_memory` (bool, default true), `agent.memory_file` (custom path)
+- [x] Old format backward-compatible parsing (`- [date] category | content`)
+- [x] `WithMemoryStore` agent option, wired into chat.go
+- [x] `/memory` slash command — show entries
+- [x] `/memory add <text>` — manually save a memory
+- [x] `/memory clear` — clear all memories
+- [x] `/memory off` — disable auto-memory for session
+- [x] `/memory edit` — open memory file in $EDITOR
+- [x] LLM-based extraction on session exit (`extractMemoriesOnExit`) — categorizes as preference (global) vs learning (project-scoped)
+- [x] ~20 tests (save/load, project tagging, filtered prompt, entries for project, parse formats, extract, entry matching, format entries)
+
+### Feature 5: Ignore System (.openmarmutignore)
+- [x] `internal/agent/ignore.go` — IgnoreList, LoadIgnoreList, ShouldIgnore
+- [x] Default patterns: `.git/`, `node_modules/`, `__pycache__/`, `.openmarmut/sessions/`, `*.pyc`, `.DS_Store`
+- [x] `.gitignore` loading — patterns from .gitignore merged before .openmarmutignore
+- [x] Pattern source tracking — `patternSource` struct, `sources` field, `FormatIgnoreDisplay()` shows origin
+- [x] Gitignore-style pattern matching (wildcards, directories, path patterns, **)
+- [x] `DirPatterns()` / `FilePatterns()` — categorized patterns for tool-level filtering
+- [x] `ShouldIgnoreEntry(name, isDir)` — entry-level filtering for list_dir
+- [x] Tool integration: `DefaultTools(il ...*IgnoreList)` — variadic, backward-compatible
+  - `grep_files` — `--exclude-dir` and `--exclude` flags
+  - `find_files` — `-not -path` and `-not -name` exclusions
+  - `list_dir` — entry filtering with `[+N hidden by .openmarmutignore]` summary
+  - `read_file` — NOT filtered (as specified)
+- [x] `AddPatternToFile(ctx, rt, pattern)` — append to .openmarmutignore
+- [x] `RemovePatternFromFile(ctx, rt, pattern)` — remove from .openmarmutignore
+- [x] `LoadIgnoreListFromOS(dir)` — OS-level loading for non-Runtime contexts
+- [x] FormatIgnorePrompt — patterns listed in system prompt
+- [x] `WithIgnoreList` agent option, wired into chat.go and ask.go
+- [x] `/ignore` slash command — show patterns with sources
+- [x] `/ignore add <pattern>` — add pattern to .openmarmutignore
+- [x] `/ignore remove <pattern>` — remove pattern from .openmarmutignore
+- [x] ~25 tests (loading, defaults, gitignore, combined ordering, dir/file patterns, entry filtering, display, add/remove, tool integration, OS loading)
+- [x] All 18 packages pass
+
 ---
 
 ## Completion Criteria
@@ -345,5 +426,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 11.3 | Plan mode: RunPlan() method with read-only tools and plan system prompt, /plan slash command (toggle + one-shot), plan→approve→execute flow with styled plan box, --plan flag for ask command. 17 new tests (8 agent + 5 CLI + 4 UI). All 18 packages pass. | Done
 
 2026-03-15 | Phase 11.4 | Three features: (1) /compact slash command — CompactHistory() agent method with LLM-based summarization, custom instructions, token reduction display, session update; (2) Extended thinking — ExtendedThinking/ThinkingBudget on ProviderEntry+Request+Response, all 6 providers updated (Anthropic thinking blocks, OpenAI/Responses reasoning_effort, Gemini thinkingConfig, Ollama silently ignored, Custom pass-through), /thinking toggle and /effort slash commands; (3) @ file references — resolveFileRefs() with regex pattern matching, file content injection in code blocks, directory listings, missing file warnings, wired into chat+ask. 30 new tests (9 compact + 8 thinking + 13 file refs). All 18 packages pass. | Done
+
+2026-03-15 | Phase 11.5 | Project memory, rules, skills, auto-memory, and ignore system: (1) OPENMARMUT.md project instruction loading with ancestor walking, global instructions, @ imports, content cap — 16 tests; (2) .openmarmut/rules/ glob-based rule system with dynamic activation — 22 tests; (3) .openmarmut/skills/ on-demand skill system with manual/auto triggers — 12 tests; (4) Auto-memory with per-project tagging, LLM-based extraction on session exit, /memory off|edit, config support — ~20 tests; (5) .openmarmutignore with .gitignore loading, default patterns, tool integration (grep/find/list_dir filtering), /ignore add|remove, pattern source tracking — ~25 tests. All 18 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->

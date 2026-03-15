@@ -31,6 +31,8 @@ type AgentConfig struct {
 	KeepRecentTurns     int      `yaml:"keep_recent_turns"`    // Minimum recent turn pairs to preserve (default 4).
 	SessionRetentionDays int     `yaml:"session_retention_days"` // Days to keep sessions before auto-cleanup (default 30).
 	PlanProvider         string  `yaml:"plan_provider"`          // Provider name for plan mode analysis (empty = use active provider).
+	AutoMemory           bool    `yaml:"auto_memory"`            // Enable auto-memory extraction on session end (default true).
+	MemoryFile           string  `yaml:"memory_file"`            // Custom path for MEMORY.md (default ~/.openmarmut/memory/MEMORY.md).
 }
 
 // LLMConfig holds all LLM provider configuration.
@@ -93,6 +95,9 @@ func defaults() *Config {
 		Log: LogConfig{
 			Level:  "info",
 			Format: "text",
+		},
+		Agent: AgentConfig{
+			AutoMemory: true,
 		},
 	}
 }

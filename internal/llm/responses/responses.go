@@ -129,14 +129,14 @@ type reasoningConfig struct {
 }
 
 type inputItem struct {
-	Type       string `json:"type"`
-	Role       string `json:"role,omitempty"`
-	Content    string `json:"content,omitempty"`
-	CallID     string `json:"call_id,omitempty"`
-	Output     string `json:"output,omitempty"`
-	ID         string `json:"id,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Arguments  string `json:"arguments,omitempty"`
+	Type      string `json:"type"`
+	Role      string `json:"role,omitempty"`
+	Content   string `json:"content,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Output    *string `json:"output,omitempty"` // pointer so nil omits, but empty string "" is preserved
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 type apiTool struct {
@@ -204,10 +204,11 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			}
 
 		case llm.RoleTool:
+			output := msg.Content
 			items = append(items, inputItem{
 				Type:   "function_call_output",
 				CallID: msg.ToolCallID,
-				Output: msg.Content,
+				Output: &output,
 			})
 		}
 	}

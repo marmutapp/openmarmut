@@ -464,6 +464,47 @@ func TestComplete_ToolResultMessages(t *testing.T) {
 	assert.Equal(t, "package main", fcoItem["output"])
 }
 
+// BUG 2 regression: function_call_output must include "output" field even when empty.
+func TestComplete_ToolResultEmptyOutput(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseEvents(
+			`{"type":"response.output_text.delta","delta":"done"}`,
+			`{"type":"response.completed","response":{"id":"r","output":[],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`,
+		))
+	}))
+	defer srv.Close()
+
+	p := testProvider(t, srv.URL)
+
+	_, err := p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: "delete temp.txt"},
+			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
+				{ID: "call_del", Name: "delete_file", Arguments: `{"path":"temp.txt"}`},
+			}},
+			{Role: llm.RoleTool, ToolCallID: "call_del", Content: ""},
+		},
+	}, nil)
+
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &parsed))
+
+	items := parsed["input"].([]any)
+	require.Len(t, items, 3)
+
+	fcoItem := items[2].(map[string]any)
+	assert.Equal(t, "function_call_output", fcoItem["type"])
+	// The "output" field MUST be present even when empty.
+	_, hasOutput := fcoItem["output"]
+	assert.True(t, hasOutput, "output field must be present on function_call_output even when empty")
+	assert.Equal(t, "", fcoItem["output"])
+}
+
 // --- Custom Headers ---
 
 func TestComplete_CustomHeaders(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -789,4 +790,49 @@ func TestSlashHelp_IncludesThinking(t *testing.T) {
 	handleSlashCommand("/help", state)
 	assert.Contains(t, buf.String(), "/thinking")
 	assert.Contains(t, buf.String(), "/effort")
+}
+
+func TestLsIgnoreFiltering(t *testing.T) {
+	// BUG 1 regression: ls command should filter entries via ignore list.
+	il := agent.NewIgnoreListForTest([]string{".git/", "node_modules/", "*.pyc"})
+
+	entries := []runtime.FileEntry{
+		{Name: ".git", IsDir: true},
+		{Name: "node_modules", IsDir: true},
+		{Name: "src", IsDir: true},
+		{Name: "main.go", IsDir: false},
+		{Name: "cache.pyc", IsDir: false},
+	}
+
+	var filtered []runtime.FileEntry
+	hidden := 0
+	for _, e := range entries {
+		if il.ShouldIgnoreEntry(e.Name, e.IsDir) {
+			hidden++
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	assert.Len(t, filtered, 2) // src + main.go
+	assert.Equal(t, 3, hidden)  // .git + node_modules + cache.pyc
+	assert.Equal(t, "src", filtered[0].Name)
+	assert.Equal(t, "main.go", filtered[1].Name)
+}
+
+func TestRenderMemory_WithEmptyStore(t *testing.T) {
+	// BUG 3 regression: memory store should be attached even with zero entries.
+	rt := &stubRuntime{}
+	memStore := agent.NewMemoryStoreAt(filepath.Join(t.TempDir(), "MEMORY.md"))
+	ag := agent.New(&panicProvider{}, rt, testLogger, agent.WithMemoryStore(memStore))
+	var buf bytes.Buffer
+	state := &chatState{
+		ag:         ag,
+		out:        &buf,
+		autoMemory: true,
+	}
+	renderMemory(state)
+	// Should show "No memories stored yet" not "not enabled".
+	assert.Contains(t, buf.String(), "No memories stored yet")
+	assert.NotContains(t, buf.String(), "not enabled")
 }

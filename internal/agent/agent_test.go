@@ -873,7 +873,7 @@ func TestGrepFilesTool_HappyPath(t *testing.T) {
 		}, nil
 	}
 
-	tool := grepFilesTool()
+	tool := grepFilesTool(nil)
 	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"func.*\\(","path":"src","include_glob":"*.go"}`))
 
 	require.NoError(t, err)
@@ -887,7 +887,7 @@ func TestGrepFilesTool_NoMatches(t *testing.T) {
 		return &runtime.ExecResult{Stdout: "", ExitCode: 1}, nil
 	}
 
-	tool := grepFilesTool()
+	tool := grepFilesTool(nil)
 	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"nonexistent"}`))
 
 	require.NoError(t, err)
@@ -900,7 +900,7 @@ func TestGrepFilesTool_GrepError(t *testing.T) {
 		return &runtime.ExecResult{Stderr: "invalid regex", ExitCode: 2}, nil
 	}
 
-	tool := grepFilesTool()
+	tool := grepFilesTool(nil)
 	_, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"[invalid"}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "grep error")
@@ -914,7 +914,7 @@ func TestGrepFilesTool_DefaultPath(t *testing.T) {
 		return &runtime.ExecResult{Stdout: "", ExitCode: 1}, nil
 	}
 
-	tool := grepFilesTool()
+	tool := grepFilesTool(nil)
 	_, _ = tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"test"}`))
 	assert.Contains(t, capturedCmd, "'.'")
 }
@@ -928,7 +928,7 @@ func TestFindFilesTool_HappyPath(t *testing.T) {
 		}, nil
 	}
 
-	tool := findFilesTool()
+	tool := findFilesTool(nil)
 	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"*.go","path":"src"}`))
 
 	require.NoError(t, err)
@@ -942,7 +942,7 @@ func TestFindFilesTool_NoResults(t *testing.T) {
 		return &runtime.ExecResult{Stdout: "", ExitCode: 0}, nil
 	}
 
-	tool := findFilesTool()
+	tool := findFilesTool(nil)
 	output, err := tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"*.xyz"}`))
 
 	require.NoError(t, err)
@@ -957,7 +957,7 @@ func TestFindFilesTool_DefaultPath(t *testing.T) {
 		return &runtime.ExecResult{Stdout: "", ExitCode: 0}, nil
 	}
 
-	tool := findFilesTool()
+	tool := findFilesTool(nil)
 	_, _ = tool.Execute(context.Background(), rt, json.RawMessage(`{"pattern":"*.go"}`))
 	assert.Contains(t, capturedCmd, "'.'")
 }

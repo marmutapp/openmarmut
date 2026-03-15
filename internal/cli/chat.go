@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	osexec "os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +46,11 @@ type chatState struct {
 	rt           runtime.Runtime  // runtime for /rewind, /diff, /commit.
 	isGitRepo    bool             // true if target dir is a git repo.
 	planMode     bool             // true when plan mode is toggled on.
+	pendingSkill string           // skill content to prepend to next user message.
+	memoryDisabled bool           // true when auto-memory is disabled for this session.
+	provider     llm.Provider     // LLM provider for memory extraction.
+	targetDir    string           // target directory for project tagging.
+	autoMemory   bool             // config: auto_memory enabled.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -100,6 +107,21 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return slashHandled
 	}
 
+	if strings.HasPrefix(line, "/memory ") {
+		handleMemoryCommand(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/skill") {
+		handleSkill(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/ignore") {
+		handleIgnore(line, state)
+		return slashHandled
+	}
+
 	if strings.HasPrefix(line, "/plan") {
 		return handlePlan(line, state)
 	}
@@ -107,6 +129,12 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 	switch line {
 	case "/quit", "/exit":
 		return slashExit
+	case "/rules":
+		renderRules(state)
+		return slashHandled
+	case "/memory":
+		renderMemory(state)
+		return slashHandled
 	case "/clear":
 		state.ag.ClearHistory()
 		state.sessionUsage = llm.Usage{}
@@ -149,6 +177,16 @@ func renderHelpBox(w io.Writer) {
 		{"/thinking", "Toggle extended thinking on/off"},
 		{"/effort <level>", "Set thinking effort (low/medium/high)"},
 		{"/plan [msg]", "Toggle plan mode or plan one-shot"},
+		{"/rules", "Show loaded rules and active status"},
+		{"/skill [name]", "List skills or invoke one"},
+		{"/memory", "Show stored memories"},
+		{"/memory add <text>", "Save a memory manually"},
+		{"/memory clear", "Clear all memories"},
+		{"/memory off", "Disable auto-memory for this session"},
+		{"/memory edit", "Open MEMORY.md in $EDITOR"},
+		{"/ignore", "Show current ignore patterns"},
+		{"/ignore add <pat>", "Add pattern to .openmarmutignore"},
+		{"/ignore remove <pat>", "Remove pattern from .openmarmutignore"},
 		{"/sessions", "List recent sessions"},
 		{"/rename <name>", "Rename current session"},
 		{"/help", "Show this help"},
@@ -156,6 +194,230 @@ func renderHelpBox(w io.Writer) {
 	}
 	headers := []string{"COMMAND", "DESCRIPTION"}
 	fmt.Fprintln(w, ui.RenderBox("Commands", ui.RenderTable(headers, commands, -1)))
+}
+
+// renderMemory displays stored auto-memory entries.
+func renderMemory(state *chatState) {
+	mem := state.ag.Memory()
+	if mem == nil {
+		fmt.Fprintln(state.out, ui.FormatHint("Auto-memory is not enabled."))
+		return
+	}
+	entries := mem.Entries()
+	if len(entries) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No memories stored yet."))
+		return
+	}
+
+	headers := []string{"DATE", "PROJECT", "CATEGORY", "CONTENT"}
+	var rows [][]string
+	for _, e := range entries {
+		content := e.Content
+		if len(content) > 80 {
+			content = content[:80] + "..."
+		}
+		project := "global"
+		if e.Project != "" {
+			project = e.Project
+		}
+		rows = append(rows, []string{
+			e.Timestamp.Format("2006-01-02"),
+			project,
+			e.Category,
+			content,
+		})
+	}
+	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+	fmt.Fprintln(state.out, ui.FormatHint(fmt.Sprintf("Path: %s", mem.Path())))
+	if state.memoryDisabled {
+		fmt.Fprintln(state.out, ui.FormatWarning("Auto-memory is disabled for this session."))
+	}
+}
+
+// handleMemoryCommand processes /memory add, /memory clear, /memory off, /memory edit.
+func handleMemoryCommand(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/memory"))
+
+	mem := state.ag.Memory()
+
+	if strings.HasPrefix(arg, "add ") {
+		content := strings.TrimSpace(strings.TrimPrefix(arg, "add"))
+		if content == "" {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /memory add <text>"))
+			return
+		}
+		if mem == nil {
+			mem = agent.NewMemoryStore()
+			if mem == nil {
+				fmt.Fprintln(state.out, ui.FormatError("Cannot create memory store."))
+				return
+			}
+		}
+		if err := mem.Save("user", content); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to save memory: "+err.Error()))
+			return
+		}
+		fmt.Fprintln(state.out, ui.FormatSuccess("Memory saved."))
+		return
+	}
+
+	if arg == "clear" {
+		if mem == nil {
+			fmt.Fprintln(state.out, ui.FormatHint("No memory store to clear."))
+			return
+		}
+		if err := mem.Clear(); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to clear memory: "+err.Error()))
+			return
+		}
+		fmt.Fprintln(state.out, ui.FormatSuccess("All memories cleared."))
+		return
+	}
+
+	if arg == "off" {
+		state.memoryDisabled = true
+		fmt.Fprintln(state.out, ui.FormatSuccess("Auto-memory disabled for this session."))
+		return
+	}
+
+	if arg == "edit" {
+		if mem == nil {
+			fmt.Fprintln(state.out, ui.FormatWarning("No memory store configured."))
+			return
+		}
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+		cmd := osexec.Command(editor, mem.Path())
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Editor failed: "+err.Error()))
+			return
+		}
+		// Reload memories after editing.
+		if err := mem.Load(); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to reload memories: "+err.Error()))
+			return
+		}
+		fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Reloaded %d memories.", mem.Count())))
+		return
+	}
+
+	fmt.Fprintln(state.out, ui.FormatWarning("Usage: /memory, /memory add <text>, /memory clear, /memory off, /memory edit"))
+}
+
+// handleIgnore processes /ignore, /ignore add <pat>, /ignore remove <pat>.
+func handleIgnore(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/ignore"))
+
+	// /ignore — show current patterns.
+	if arg == "" {
+		il := state.ag.IgnoreList()
+		fmt.Fprintln(state.out, agent.FormatIgnoreDisplay(il))
+		return
+	}
+
+	ctx := context.Background()
+
+	if strings.HasPrefix(arg, "add ") {
+		pattern := strings.TrimSpace(strings.TrimPrefix(arg, "add "))
+		if pattern == "" {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /ignore add <pattern>"))
+			return
+		}
+		if err := agent.AddPatternToFile(ctx, state.rt, pattern); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to add pattern: "+err.Error()))
+			return
+		}
+		fmt.Fprintln(state.out, ui.FormatSuccess("Added "+pattern+" to .openmarmutignore"))
+		return
+	}
+
+	if strings.HasPrefix(arg, "remove ") {
+		pattern := strings.TrimSpace(strings.TrimPrefix(arg, "remove "))
+		if pattern == "" {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /ignore remove <pattern>"))
+			return
+		}
+		if err := agent.RemovePatternFromFile(ctx, state.rt, pattern); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to remove pattern: "+err.Error()))
+			return
+		}
+		fmt.Fprintln(state.out, ui.FormatSuccess("Removed "+pattern+" from .openmarmutignore"))
+		return
+	}
+
+	fmt.Fprintln(state.out, ui.FormatWarning("Usage: /ignore, /ignore add <pattern>, /ignore remove <pattern>"))
+}
+
+// handleSkill processes /skill commands.
+// /skill — list available skills.
+// /skill <name> — display skill details and apply it.
+func handleSkill(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/skill"))
+
+	skills := state.ag.Skills()
+	if len(skills) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No skills loaded. Add .md files to .openmarmut/skills/"))
+		return
+	}
+
+	if arg == "" || arg == "s" {
+		// List all skills.
+		headers := []string{"NAME", "TRIGGER", "DESCRIPTION"}
+		var rows [][]string
+		for _, s := range skills {
+			rows = append(rows, []string{s.Name, s.Trigger, s.Description})
+		}
+		fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+		return
+	}
+
+	// Find and display a specific skill.
+	skill := agent.FindSkill(skills, arg)
+	if skill == nil {
+		fmt.Fprintln(state.out, ui.FormatWarning("Unknown skill: "+arg))
+		fmt.Fprintln(state.out, ui.FormatHint("Use /skill to list available skills"))
+		return
+	}
+
+	fmt.Fprintln(state.out, ui.RenderBox("Skill: "+skill.Name, skill.Content))
+	fmt.Fprintln(state.out, ui.FormatHint("This skill's prompt will be prepended to your next message."))
+
+	// Store the skill content to prepend to the next user message.
+	state.pendingSkill = skill.Content
+}
+
+// renderRules displays all loaded rules with their glob patterns and active status.
+func renderRules(state *chatState) {
+	rules := state.ag.Rules()
+	if len(rules) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No rules loaded. Add .md files to .openmarmut/rules/"))
+		return
+	}
+
+	activeContent := state.ag.ActiveRulesContent()
+
+	headers := []string{"SOURCE", "GLOBS", "ACTIVE"}
+	var rows [][]string
+	for _, r := range rules {
+		globStr := strings.Join(r.Globs, ", ")
+		if globStr == "" {
+			globStr = "(always)"
+		}
+		active := "no"
+		if activeContent != "" && strings.Contains(activeContent, r.Content) {
+			active = "yes"
+		}
+		if len(r.Globs) == 0 {
+			active = "yes" // No globs = always active.
+		}
+		rows = append(rows, []string{r.Source, globStr, active})
+	}
+	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
 }
 
 // renderToolsTable displays tools with their permission levels.
@@ -412,11 +674,47 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			checkpoints := agent.NewCheckpointStore()
 			opts = append(opts, agent.WithCheckpointStore(checkpoints))
 
+			// Load project instructions from OPENMARMUT.md files.
+			projInfo, _ := agent.LoadProjectInstructions(cmd.Context(), rt)
+			if projInfo != nil && projInfo.Content != "" {
+				opts = append(opts, agent.WithProjectInstructions(projInfo.Content))
+			}
+
+			// Load rules from .openmarmut/rules/.
+			rules, _ := agent.LoadRules(cmd.Context(), rt)
+			if len(rules) > 0 {
+				opts = append(opts, agent.WithRules(rules))
+			}
+
+			// Load skills from .openmarmut/skills/.
+			skills, _ := agent.LoadSkills(cmd.Context(), rt)
+			if len(skills) > 0 {
+				opts = append(opts, agent.WithSkills(skills))
+			}
+
+			// Load ignore list from .openmarmutignore.
+			ignoreList := agent.LoadIgnoreList(cmd.Context(), rt)
+			if ignoreList != nil && len(ignoreList.Patterns()) > 0 {
+				opts = append(opts, agent.WithIgnoreList(ignoreList))
+			}
+
+			// Load auto-memory from previous sessions.
+			if cfg.Agent.AutoMemory {
+				memStore := agent.NewMemoryStoreWithPath(cfg.Agent.MemoryFile)
+				if memStore != nil {
+					memStore.Load() //nolint:errcheck
+					opts = append(opts, agent.WithMemoryStore(memStore))
+				}
+			}
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			state.ag = ag
 			state.permChecker = pc
 			state.rt = rt
+			state.provider = provider
+			state.targetDir = cfg.TargetDir
+			state.autoMemory = cfg.Agent.AutoMemory
 
 			// Detect git repo for dirty state warning and /diff+/commit.
 			state.isGitRepo = isGitRepo(cmd.Context(), rt)
@@ -487,6 +785,17 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					cfg.TargetDir, cfg.Mode,
 				))
 
+				// Display project instructions status.
+				if projInfo != nil && projInfo.Content != "" {
+					msg := fmt.Sprintf("Instructions: %s (%d lines)", projInfo.Source, projInfo.Lines)
+					if projInfo.Truncated {
+						msg += " [truncated]"
+					}
+					fmt.Fprintln(os.Stderr, ui.FormatHint(msg))
+				} else {
+					fmt.Fprintln(os.Stderr, ui.FormatHint("No OPENMARMUT.md found"))
+				}
+
 				// Warn about pre-existing uncommitted changes.
 				if state.isGitRepo {
 					warnDirtyState(cmd.Context(), rt, os.Stderr)
@@ -515,7 +824,8 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				action := handleSlashCommand(line, state)
 				switch action {
 				case slashExit:
-					// Final save.
+					// Extract memories and final save.
+					extractMemoriesOnExit(cmd.Context(), state)
 					saveSession(state)
 					return nil
 				case slashHandled:
@@ -526,6 +836,12 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				line, fileWarnings := resolveFileRefs(cmd.Context(), line, rt)
 				for _, w := range fileWarnings {
 					fmt.Fprintln(os.Stderr, ui.FormatWarning(w))
+				}
+
+				// Prepend pending skill content if a skill was just invoked.
+				if state.pendingSkill != "" {
+					line = state.pendingSkill + "\n\n" + line
+					state.pendingSkill = ""
 				}
 
 				// If plan mode is toggled on, route through plan flow.
@@ -619,7 +935,8 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				fmt.Fprintln(os.Stderr)
 			}
 
-			// Final save on EOF.
+			// Extract memories and final save on EOF.
+			extractMemoriesOnExit(cmd.Context(), state)
 			saveSession(state)
 
 			if err := state.scanner.Err(); err != nil {
@@ -676,6 +993,63 @@ func saveSession(state *chatState) {
 		state.sess.TotalCost = cost
 	}
 	session.Save(state.sess) //nolint:errcheck
+}
+
+// extractMemoriesOnExit runs LLM-based memory extraction if auto_memory is enabled.
+func extractMemoriesOnExit(ctx context.Context, state *chatState) {
+	if !state.autoMemory || state.memoryDisabled {
+		return
+	}
+
+	mem := state.ag.Memory()
+	if mem == nil {
+		mem = agent.NewMemoryStore()
+		if mem == nil {
+			return
+		}
+	}
+
+	// Need at least a few turns to extract anything useful.
+	history := state.ag.History()
+	turnCount := 0
+	for _, m := range history {
+		if m.Role == llm.RoleUser {
+			turnCount++
+		}
+	}
+	if turnCount < 2 {
+		return
+	}
+
+	// Read existing memory content for deduplication.
+	existingContent := ""
+	if data, err := os.ReadFile(mem.Path()); err == nil {
+		existingContent = string(data)
+	}
+
+	memories, err := agent.ExtractMemories(ctx, state.provider, history, state.targetDir, existingContent)
+	if err != nil {
+		slog.Debug("auto-memory extraction failed", "error", err)
+		return
+	}
+
+	for _, m := range memories {
+		// Detect if this is a preference (global) or project-specific.
+		category := "learning"
+		project := state.targetDir
+		lower := strings.ToLower(m)
+		if strings.Contains(lower, "prefer") || strings.Contains(lower, "style") || strings.Contains(lower, "always") {
+			category = "preference"
+			project = "" // Preferences are global.
+		}
+		if err := mem.SaveWithProject(project, category, m); err != nil {
+			slog.Debug("auto-memory save failed", "error", err)
+		}
+	}
+
+	if len(memories) > 0 {
+		fmt.Fprintf(state.out, "%s\n", ui.FormatHint(fmt.Sprintf("Saved %d new memories.", len(memories))))
+	}
 }
 
 // renderResumeBanner displays a styled box with session resume information.

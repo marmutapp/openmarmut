@@ -130,23 +130,29 @@ type ToolCallCallback func(tc llm.ToolCall)
 
 // Agent orchestrates the observe→plan→act→verify loop.
 type Agent struct {
-	provider       llm.Provider
-	rt             runtime.Runtime
-	tools          []Tool
-	toolMap        map[string]Tool
-	logger         *slog.Logger
-	history        []llm.Message
-	maxIterations  int
-	systemPrompt   string
-	temperature    *float64
-	maxTokens      *int
-	credentialKeys   []string
-	contextCfg       ContextConfig
-	onToolCall       ToolCallCallback
-	extendedThinking bool
-	thinkingBudget   int
-	permChecker    *PermissionChecker
-	checkpoints    *CheckpointStore
+	provider             llm.Provider
+	rt                   runtime.Runtime
+	tools                []Tool
+	toolMap              map[string]Tool
+	logger               *slog.Logger
+	history              []llm.Message
+	maxIterations        int
+	systemPrompt         string
+	projectInstructions  string
+	temperature          *float64
+	maxTokens            *int
+	credentialKeys       []string
+	contextCfg           ContextConfig
+	onToolCall           ToolCallCallback
+	extendedThinking     bool
+	thinkingBudget       int
+	permChecker          *PermissionChecker
+	checkpoints          *CheckpointStore
+	rules                []Rule
+	activeRulesContent   string
+	skills               []Skill
+	memory               *MemoryStore
+	ignoreList           *IgnoreList
 }
 
 // Option configures the Agent.
@@ -197,6 +203,31 @@ func WithCheckpointStore(cs *CheckpointStore) Option {
 	return func(a *Agent) { a.checkpoints = cs }
 }
 
+// WithProjectInstructions prepends project instructions to the system prompt.
+func WithProjectInstructions(instructions string) Option {
+	return func(a *Agent) { a.projectInstructions = instructions }
+}
+
+// WithRules sets the loaded rules for dynamic activation.
+func WithRules(rules []Rule) Option {
+	return func(a *Agent) { a.rules = rules }
+}
+
+// WithSkills sets the loaded skills.
+func WithSkills(skills []Skill) Option {
+	return func(a *Agent) { a.skills = skills }
+}
+
+// WithMemoryStore sets the auto-memory store.
+func WithMemoryStore(m *MemoryStore) Option {
+	return func(a *Agent) { a.memory = m }
+}
+
+// WithIgnoreList sets the ignore list for file filtering.
+func WithIgnoreList(il *IgnoreList) Option {
+	return func(a *Agent) { a.ignoreList = il }
+}
+
 // WithExtendedThinking enables extended thinking / reasoning tokens.
 func WithExtendedThinking(enabled bool, budget int) Option {
 	return func(a *Agent) {
@@ -216,17 +247,9 @@ func (a *Agent) SetThinkingBudget(budget int) { a.thinkingBudget = budget }
 
 // New creates an Agent with the given provider and runtime.
 func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ...Option) *Agent {
-	tools := DefaultTools()
-	toolMap := make(map[string]Tool, len(tools))
-	for _, t := range tools {
-		toolMap[t.Def.Name] = t
-	}
-
 	a := &Agent{
 		provider:      provider,
 		rt:            rt,
-		tools:         tools,
-		toolMap:       toolMap,
 		logger:        logger,
 		maxIterations: defaultMaxIterations,
 		contextCfg:    DefaultContextConfig(),
@@ -236,8 +259,35 @@ func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ..
 		opt(a)
 	}
 
+	// Build tools after options are applied so ignoreList is available.
+	tools := DefaultTools(a.ignoreList)
+	toolMap := make(map[string]Tool, len(tools))
+	for _, t := range tools {
+		toolMap[t.Def.Name] = t
+	}
+	a.tools = tools
+	a.toolMap = toolMap
+
 	if a.systemPrompt == "" {
-		a.systemPrompt = fmt.Sprintf(defaultSystemPrompt, rt.TargetDir())
+		base := fmt.Sprintf(defaultSystemPrompt, rt.TargetDir())
+		if a.projectInstructions != "" {
+			a.systemPrompt = FormatProjectInstructionsPrompt(a.projectInstructions) + base
+		} else {
+			a.systemPrompt = base
+		}
+		// Append auto-skill descriptions (2% of context window budget).
+		if len(a.skills) > 0 {
+			maxChars := a.contextCfg.ContextWindow * 4 / 100 * 2 // ~2% of context in chars
+			a.systemPrompt += FormatAutoSkillDescriptions(a.skills, maxChars)
+		}
+		// Append auto-memory from previous sessions.
+		if a.memory != nil {
+			a.systemPrompt += a.memory.FormatForPrompt()
+		}
+		// Append ignore list.
+		if a.ignoreList != nil {
+			a.systemPrompt += FormatIgnorePrompt(a.ignoreList)
+		}
 	}
 
 	// Prepend system message to history.
@@ -271,6 +321,9 @@ func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCa
 		if len(a.history) < prevLen {
 			result.Truncated = true
 		}
+
+		// Update active rules based on recently accessed files.
+		a.refreshActiveRules()
 
 		req := llm.Request{
 			Messages:         a.history,
@@ -614,6 +667,55 @@ func (a *Agent) CompactHistory(ctx context.Context, customInstruction string) (b
 // ReadOnlyToolNames returns the set of tool names available in plan mode.
 func ReadOnlyToolNames() map[string]bool {
 	return readOnlyTools
+}
+
+// Rules returns the loaded rules.
+func (a *Agent) Rules() []Rule {
+	return a.rules
+}
+
+// Skills returns the loaded skills.
+func (a *Agent) Skills() []Skill {
+	return a.skills
+}
+
+// Memory returns the auto-memory store (may be nil).
+func (a *Agent) Memory() *MemoryStore {
+	return a.memory
+}
+
+// ActiveRulesContent returns the currently active rules content.
+func (a *Agent) ActiveRulesContent() string {
+	return a.activeRulesContent
+}
+
+// IgnoreList returns the agent's ignore list (may be nil).
+func (a *Agent) IgnoreList() *IgnoreList {
+	return a.ignoreList
+}
+
+// refreshActiveRules updates the system prompt with rules matching recently accessed files.
+func (a *Agent) refreshActiveRules() {
+	if len(a.rules) == 0 {
+		return
+	}
+
+	// Extract file paths from last 10 messages.
+	filePaths := ExtractRecentFilePaths(a.history, 10)
+	newContent := MatchRules(a.rules, filePaths)
+
+	if newContent == a.activeRulesContent {
+		return // No change.
+	}
+
+	// Update the system prompt: remove old active rules section, add new one.
+	oldSuffix := FormatActiveRules(a.activeRulesContent)
+	base := a.history[0].Content
+	if oldSuffix != "" {
+		base = strings.TrimSuffix(base, oldSuffix)
+	}
+	a.activeRulesContent = newContent
+	a.history[0].Content = base + FormatActiveRules(newContent)
 }
 
 // Tools returns the agent's available tools.

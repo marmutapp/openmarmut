@@ -134,6 +134,24 @@ func newAskCmd(runner *Runner) *cobra.Command {
 			)
 			opts = append(opts, agent.WithPermissionChecker(pc))
 
+			// Load project instructions from OPENMARMUT.md files.
+			projInfo, _ := agent.LoadProjectInstructions(cmd.Context(), rt)
+			if projInfo != nil && projInfo.Content != "" {
+				opts = append(opts, agent.WithProjectInstructions(projInfo.Content))
+			}
+
+			// Load rules from .openmarmut/rules/.
+			rules, _ := agent.LoadRules(cmd.Context(), rt)
+			if len(rules) > 0 {
+				opts = append(opts, agent.WithRules(rules))
+			}
+
+			// Load ignore list from .openmarmutignore.
+			ignoreList := agent.LoadIgnoreList(cmd.Context(), rt)
+			if ignoreList != nil && len(ignoreList.Patterns()) > 0 {
+				opts = append(opts, agent.WithIgnoreList(ignoreList))
+			}
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			// Resolve @file references in the question.

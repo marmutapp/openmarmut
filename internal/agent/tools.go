@@ -19,18 +19,23 @@ type Tool struct {
 }
 
 // DefaultTools returns the standard set of tools backed by a Runtime.
-func DefaultTools() []Tool {
+// An optional IgnoreList filters results for grep_files, find_files, and list_dir.
+func DefaultTools(il ...*IgnoreList) []Tool {
+	var ignoreList *IgnoreList
+	if len(il) > 0 {
+		ignoreList = il[0]
+	}
 	return []Tool{
 		readFileTool(),
 		readFileLinesTool(),
 		writeFileTool(),
 		patchFileTool(),
 		deleteFileTool(),
-		listDirTool(),
+		listDirTool(ignoreList),
 		mkdirTool(),
 		execTool(),
-		grepFilesTool(),
-		findFilesTool(),
+		grepFilesTool(ignoreList),
+		findFilesTool(ignoreList),
 		gitStatusTool(),
 		gitDiffTool(),
 		gitDiffStagedTool(),
@@ -153,7 +158,7 @@ func deleteFileTool() Tool {
 	}
 }
 
-func listDirTool() Tool {
+func listDirTool(il *IgnoreList) Tool {
 	return Tool{
 		Def: llm.ToolDef{
 			Name:        "list_dir",
@@ -185,12 +190,25 @@ func listDirTool() Tool {
 				IsDir bool   `json:"is_dir"`
 				Size  int64  `json:"size"`
 			}
-			out := make([]entry, len(entries))
-			for i, e := range entries {
-				out[i] = entry{Name: e.Name, IsDir: e.IsDir, Size: e.Size}
+
+			var out []entry
+			hidden := 0
+			for _, e := range entries {
+				if il != nil && il.ShouldIgnoreEntry(e.Name, e.IsDir) {
+					hidden++
+					continue
+				}
+				out = append(out, entry{Name: e.Name, IsDir: e.IsDir, Size: e.Size})
+			}
+			if out == nil {
+				out = []entry{}
 			}
 			b, _ := json.Marshal(out)
-			return string(b), nil
+			result := string(b)
+			if hidden > 0 {
+				result += fmt.Sprintf("\n[+%d hidden by .openmarmutignore]", hidden)
+			}
+			return result, nil
 		},
 	}
 }
@@ -368,7 +386,7 @@ func patchFileTool() Tool {
 	}
 }
 
-func grepFilesTool() Tool {
+func grepFilesTool(il *IgnoreList) Tool {
 	return Tool{
 		Def: llm.ToolDef{
 			Name:        "grep_files",
@@ -418,6 +436,15 @@ func grepFilesTool() Tool {
 			if p.IncludeGlob != "" {
 				cmd += fmt.Sprintf(" --include=%s", shellQuote(p.IncludeGlob))
 			}
+			// Add exclusions from ignore list.
+			if il != nil {
+				for _, dir := range il.DirPatterns() {
+					cmd += fmt.Sprintf(" --exclude-dir=%s", shellQuote(dir))
+				}
+				for _, fp := range il.FilePatterns() {
+					cmd += fmt.Sprintf(" --exclude=%s", shellQuote(fp))
+				}
+			}
 			cmd += " " + shellQuote(p.Path)
 			cmd += fmt.Sprintf(" | head -n %d", p.MaxResults)
 
@@ -442,7 +469,7 @@ func grepFilesTool() Tool {
 	}
 }
 
-func findFilesTool() Tool {
+func findFilesTool(il *IgnoreList) Tool {
 	return Tool{
 		Def: llm.ToolDef{
 			Name:        "find_files",
@@ -474,8 +501,20 @@ func findFilesTool() Tool {
 				p.Path = "."
 			}
 
-			cmd := fmt.Sprintf("find %s -name %s -type f 2>/dev/null | head -n 100",
+			cmd := fmt.Sprintf("find %s -name %s -type f",
 				shellQuote(p.Path), shellQuote(p.Pattern))
+
+			// Add exclusions from ignore list.
+			if il != nil {
+				for _, dir := range il.DirPatterns() {
+					cmd += fmt.Sprintf(" -not -path '*/%s/*'", dir)
+				}
+				for _, fp := range il.FilePatterns() {
+					cmd += fmt.Sprintf(" -not -name %s", shellQuote(fp))
+				}
+			}
+
+			cmd += " 2>/dev/null | head -n 100"
 
 			result, err := rt.Exec(ctx, cmd, runtime.ExecOpts{})
 			if err != nil {
