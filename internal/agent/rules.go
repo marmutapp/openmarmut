@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 // Rule represents a modular rule loaded from .openmarmut/rules/.

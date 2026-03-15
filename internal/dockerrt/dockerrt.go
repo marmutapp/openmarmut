@@ -18,8 +18,8 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/gajaai/openmarmut-go/internal/config"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/config"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 

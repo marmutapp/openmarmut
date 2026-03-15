@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/session"
-	"github.com/gajaai/openmarmut-go/internal/ui"
+	"github.com/marmutapp/openmarmut/internal/session"
+	"github.com/marmutapp/openmarmut/internal/ui"
 	"github.com/spf13/cobra"
 )
 

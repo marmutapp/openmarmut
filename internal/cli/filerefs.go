@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gajaai/openmarmut-go/internal/agent"
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/agent"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 // fileRefPattern matches @<path> patterns in user input.

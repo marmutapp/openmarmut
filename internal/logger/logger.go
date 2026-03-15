@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/gajaai/openmarmut-go/internal/config"
+	"github.com/marmutapp/openmarmut/internal/config"
 )
 
 // New creates a configured *slog.Logger from LogConfig.

@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/pathutil"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/pathutil"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 // LocalRuntime implements runtime.Runtime using the host filesystem and os/exec.

@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 // projectFileNames lists the filenames to search for project instructions,

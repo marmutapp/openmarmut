@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/config"
+	"github.com/marmutapp/openmarmut/internal/config"
 )
 
 // Hook defines a user-configured hook that runs before or after tool execution.

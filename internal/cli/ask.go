@@ -5,20 +5,20 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gajaai/openmarmut-go/internal/agent"
-	"github.com/gajaai/openmarmut-go/internal/config"
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/logger"
-	"github.com/gajaai/openmarmut-go/internal/ui"
+	"github.com/marmutapp/openmarmut/internal/agent"
+	"github.com/marmutapp/openmarmut/internal/config"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/logger"
+	"github.com/marmutapp/openmarmut/internal/ui"
 	"github.com/spf13/cobra"
 
 	// Register LLM wire format providers.
-	_ "github.com/gajaai/openmarmut-go/internal/llm/anthropic"
-	_ "github.com/gajaai/openmarmut-go/internal/llm/custom"
-	_ "github.com/gajaai/openmarmut-go/internal/llm/gemini"
-	_ "github.com/gajaai/openmarmut-go/internal/llm/ollama"
-	_ "github.com/gajaai/openmarmut-go/internal/llm/openai"
-	_ "github.com/gajaai/openmarmut-go/internal/llm/responses"
+	_ "github.com/marmutapp/openmarmut/internal/llm/anthropic"
+	_ "github.com/marmutapp/openmarmut/internal/llm/custom"
+	_ "github.com/marmutapp/openmarmut/internal/llm/gemini"
+	_ "github.com/marmutapp/openmarmut/internal/llm/ollama"
+	_ "github.com/marmutapp/openmarmut/internal/llm/openai"
+	_ "github.com/marmutapp/openmarmut/internal/llm/responses"
 )
 
 func newAskCmd(runner *Runner) *cobra.Command {

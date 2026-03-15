@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 	"github.com/spf13/cobra"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/llm"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

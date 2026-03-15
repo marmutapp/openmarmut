@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/config"
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/config"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 // Team Status constants.

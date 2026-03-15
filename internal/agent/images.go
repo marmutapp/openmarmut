@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 // MaxImageSize is the maximum allowed image file size (20 MB).

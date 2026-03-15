@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gajaai/openmarmut-go/internal/config"
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/logger"
-	"github.com/gajaai/openmarmut-go/internal/ui"
+	"github.com/marmutapp/openmarmut/internal/config"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/logger"
+	"github.com/marmutapp/openmarmut/internal/ui"
 	"github.com/spf13/cobra"
 )
 

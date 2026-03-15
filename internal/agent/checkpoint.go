@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 const maxCheckpoints = 50

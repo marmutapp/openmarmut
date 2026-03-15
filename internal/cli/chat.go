@@ -14,14 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/agent"
-	"github.com/gajaai/openmarmut-go/internal/config"
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/logger"
-	"github.com/gajaai/openmarmut-go/internal/mcp"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
-	"github.com/gajaai/openmarmut-go/internal/session"
-	"github.com/gajaai/openmarmut-go/internal/ui"
+	"github.com/marmutapp/openmarmut/internal/agent"
+	"github.com/marmutapp/openmarmut/internal/config"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/logger"
+	"github.com/marmutapp/openmarmut/internal/mcp"
+	"github.com/marmutapp/openmarmut/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/session"
+	"github.com/marmutapp/openmarmut/internal/ui"
 	"github.com/spf13/cobra"
 )
 

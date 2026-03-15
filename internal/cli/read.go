@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gajaai/openmarmut-go/internal/runtime"
-	"github.com/gajaai/openmarmut-go/internal/ui"
+	"github.com/marmutapp/openmarmut/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/ui"
 	"github.com/spf13/cobra"
 )
 

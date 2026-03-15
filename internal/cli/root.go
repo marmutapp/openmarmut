@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"github.com/gajaai/openmarmut-go/internal/config"
+	"github.com/marmutapp/openmarmut/internal/config"
 	"github.com/spf13/cobra"
 )
 

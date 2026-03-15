@@ -1,5 +1,5 @@
 BINARY := openmarmut
-MODULE := github.com/gajaai/openmarmut-go
+MODULE := github.com/marmutapp/openmarmut
 GOFLAGS ?=
 
 .PHONY: build test lint integration-test clean fmt vet

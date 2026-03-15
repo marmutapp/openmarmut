@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/gajaai/openmarmut-go/internal/config"
-	"github.com/gajaai/openmarmut-go/internal/logger"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/config"
+	"github.com/marmutapp/openmarmut/internal/logger"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 
 	// Register runtime implementations.
-	_ "github.com/gajaai/openmarmut-go/internal/dockerrt"
-	_ "github.com/gajaai/openmarmut-go/internal/localrt"
+	_ "github.com/marmutapp/openmarmut/internal/dockerrt"
+	_ "github.com/marmutapp/openmarmut/internal/localrt"
 )
 
 // Runner manages the config → logger → runtime → init → fn → close lifecycle.

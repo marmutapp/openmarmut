@@ -1,4 +1,4 @@
-module github.com/gajaai/openmarmut-go
+module github.com/marmutapp/openmarmut
 
 go 1.25.0
 

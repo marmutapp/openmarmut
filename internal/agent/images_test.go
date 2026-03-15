@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/localrt"
+	"github.com/marmutapp/openmarmut/internal/localrt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

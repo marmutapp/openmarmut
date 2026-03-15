@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/llm"
 )
 
 const (

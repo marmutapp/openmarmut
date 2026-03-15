@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gajaai/openmarmut-go/internal/cli"
-	"github.com/gajaai/openmarmut-go/internal/ui"
+	"github.com/marmutapp/openmarmut/internal/cli"
+	"github.com/marmutapp/openmarmut/internal/ui"
 )
 
 func main() {

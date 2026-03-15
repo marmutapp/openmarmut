@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/llm"
 )
 
 // Provider implements llm.Provider for the Google Gemini API.

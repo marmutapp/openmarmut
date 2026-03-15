@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/mcp"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/mcp"
 	"gopkg.in/yaml.v3"
 )
 

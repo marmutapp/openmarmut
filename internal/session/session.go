@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/llm"
 )
 
 // Session captures the full execution context of a conversation.

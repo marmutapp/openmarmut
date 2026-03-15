@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gajaai/openmarmut-go/internal/agent"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
-	"github.com/gajaai/openmarmut-go/internal/ui"
+	"github.com/marmutapp/openmarmut/internal/agent"
+	"github.com/marmutapp/openmarmut/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/ui"
 	"github.com/spf13/cobra"
 )
 

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gajaai/openmarmut-go/internal/llm"
-	"github.com/gajaai/openmarmut-go/internal/mcp"
-	"github.com/gajaai/openmarmut-go/internal/runtime"
+	"github.com/marmutapp/openmarmut/internal/llm"
+	"github.com/marmutapp/openmarmut/internal/mcp"
+	"github.com/marmutapp/openmarmut/internal/runtime"
 )
 
 const defaultMaxIterations = 10
