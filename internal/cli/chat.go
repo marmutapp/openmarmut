@@ -17,6 +17,7 @@ import (
 	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/logger"
+	"github.com/gajaai/openmarmut-go/internal/mcp"
 	"github.com/gajaai/openmarmut-go/internal/runtime"
 	"github.com/gajaai/openmarmut-go/internal/session"
 	"github.com/gajaai/openmarmut-go/internal/ui"
@@ -54,6 +55,7 @@ type chatState struct {
 	subMgr       *agent.SubAgentManager // sub-agent tracker.
 	cfg          *config.Config   // config for sub-agent context settings.
 	log          *slog.Logger     // logger for sub-agent spawning.
+	mcpMgr       *mcp.Manager     // MCP server manager.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -130,6 +132,11 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return slashHandled
 	}
 
+	if line == "/mcp" {
+		renderMCPStatus(state)
+		return slashHandled
+	}
+
 	if strings.HasPrefix(line, "/agent ") {
 		handleAgent(line, state)
 		return slashHandled
@@ -203,6 +210,7 @@ func renderHelpBox(w io.Writer) {
 		{"/agent <task>", "Spawn a sub-agent for a task"},
 		{"/agents", "List sub-agents in this session"},
 		{"/agents kill <name>", "Stop a running sub-agent"},
+		{"/mcp", "Show connected MCP servers and tools"},
 		{"/sessions", "List recent sessions"},
 		{"/rename <name>", "Rename current session"},
 		{"/help", "Show this help"},
@@ -503,6 +511,40 @@ func renderContextBox(state *chatState) {
 		ui.RenderProgressBar(usage.Percent, 30),
 	)
 	fmt.Fprintln(state.out, ui.RenderBox("Context Window", content))
+}
+
+// renderMCPStatus displays connected MCP servers and their tool counts.
+func renderMCPStatus(state *chatState) {
+	if state.mcpMgr == nil {
+		fmt.Fprintln(state.out, ui.FormatHint("No MCP servers configured."))
+		return
+	}
+
+	clients := state.mcpMgr.Clients()
+	if len(clients) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No MCP servers connected."))
+		return
+	}
+
+	headers := []string{"SERVER", "TRANSPORT", "TOOLS", "STATUS"}
+	var rows [][]string
+	totalTools := 0
+	for _, c := range clients {
+		tools := c.Tools()
+		totalTools += len(tools)
+		status := "disconnected"
+		if c.Connected() {
+			status = "connected"
+		}
+		rows = append(rows, []string{
+			c.Name,
+			c.Transport,
+			fmt.Sprintf("%d", len(tools)),
+			status,
+		})
+	}
+	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+	fmt.Fprintln(state.out, ui.FormatHint(fmt.Sprintf("%d MCP tool(s) available", totalTools)))
 }
 
 // renderSessionsList shows recent sessions inline in the chat REPL.
@@ -881,6 +923,34 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			// Enable sub-agent spawning via tool call.
 			opts = append(opts, agent.WithSubAgentProvider(provider, log))
 
+			// Connect to MCP servers.
+			var mcpMgr *mcp.Manager
+			if len(cfg.MCP.Servers) > 0 {
+				mcpMgr = mcp.NewManager()
+				errs := mcpMgr.ConnectAll(cmd.Context(), cfg.MCP.Servers)
+				for _, e := range errs {
+					fmt.Fprintln(os.Stderr, ui.FormatWarning("MCP: "+e.Error()))
+				}
+				clients := mcpMgr.Clients()
+				if len(clients) > 0 {
+					opts = append(opts, agent.WithMCPManager(mcpMgr))
+					// Register MCP tool permissions as confirm.
+					mcpPerms := agent.MCPToolPermissions(mcpMgr)
+					for name, level := range mcpPerms {
+						perms[name] = level
+					}
+					// Rebuild permission checker with MCP tools.
+					pc = agent.NewPermissionChecker(perms, confirmFn)
+					// Replace existing WithPermissionChecker option.
+					for i, opt := range opts {
+						// We can't easily replace, so just append; last one wins in Agent.
+						_ = i
+						_ = opt
+					}
+					opts = append(opts, agent.WithPermissionChecker(pc))
+				}
+			}
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			state.ag = ag
@@ -892,6 +962,10 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			state.subMgr = agent.NewSubAgentManager()
 			state.cfg = cfg
 			state.log = log
+			state.mcpMgr = mcpMgr
+			if mcpMgr != nil {
+				defer mcpMgr.CloseAll()
+			}
 
 			// Detect git repo for dirty state warning and /diff+/commit.
 			state.isGitRepo = isGitRepo(cmd.Context(), rt)
@@ -971,6 +1045,19 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					fmt.Fprintln(os.Stderr, ui.FormatHint(msg))
 				} else {
 					fmt.Fprintln(os.Stderr, ui.FormatHint("No OPENMARMUT.md found"))
+				}
+
+				// Display MCP server status.
+				if mcpMgr != nil {
+					clients := mcpMgr.Clients()
+					if len(clients) > 0 {
+						totalTools := 0
+						for _, c := range clients {
+							totalTools += len(c.Tools())
+						}
+						fmt.Fprintln(os.Stderr, ui.FormatHint(
+							fmt.Sprintf("MCP: %d server(s), %d tool(s)", len(clients), totalTools)))
+					}
 				}
 
 				// Warn about pre-existing uncommitted changes.

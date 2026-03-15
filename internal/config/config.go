@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/mcp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,6 +21,12 @@ type Config struct {
 	DefaultTimeout time.Duration `yaml:"default_timeout"`
 	LLM            LLMConfig     `yaml:"llm"`
 	Agent          AgentConfig   `yaml:"agent"`
+	MCP            MCPConfig     `yaml:"mcp"`
+}
+
+// MCPConfig holds MCP server configuration.
+type MCPConfig struct {
+	Servers []mcp.MCPServerConfig `yaml:"servers"`
 }
 
 // AgentConfig holds agent-level settings for tool permissions and context management.

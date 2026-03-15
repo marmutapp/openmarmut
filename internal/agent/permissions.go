@@ -259,7 +259,7 @@ func FormatToolPreview(tc llm.ToolCall) string {
 			fmt.Fprintf(&b, "\n  task: %s", t)
 		}
 	default:
-		// Generic: show all args.
+		// MCP tools or unknown: show all args.
 		for k, v := range args {
 			s := fmt.Sprintf("%v", v)
 			s = truncatePreview(s, 80)

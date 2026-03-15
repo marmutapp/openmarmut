@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gajaai/openmarmut-go/internal/llm"
+	"github.com/gajaai/openmarmut-go/internal/mcp"
 	"github.com/gajaai/openmarmut-go/internal/runtime"
 )
 
@@ -156,6 +157,7 @@ type Agent struct {
 	ignoreList           *IgnoreList
 	subAgentProvider     llm.Provider
 	subAgentLogger       *slog.Logger
+	mcpManager           *mcp.Manager
 }
 
 // Option configures the Agent.
@@ -276,6 +278,15 @@ func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ..
 	// Configure the spawn_subagent tool's Execute function now that the agent is built.
 	a.configureSubAgentTool()
 
+	// Register MCP tools from connected servers.
+	if a.mcpManager != nil {
+		mcpTools := MCPToolsFromManager(a.mcpManager)
+		for _, t := range mcpTools {
+			a.tools = append(a.tools, t)
+			a.toolMap[t.Def.Name] = t
+		}
+	}
+
 	if a.systemPrompt == "" {
 		base := fmt.Sprintf(defaultSystemPrompt, rt.TargetDir())
 		if a.projectInstructions != "" {
@@ -295,6 +306,10 @@ func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ..
 		// Append ignore list.
 		if a.ignoreList != nil {
 			a.systemPrompt += FormatIgnorePrompt(a.ignoreList)
+		}
+		// Append MCP tool descriptions.
+		if a.mcpManager != nil {
+			a.systemPrompt += FormatMCPToolsPrompt(a.mcpManager)
 		}
 	}
 
@@ -700,6 +715,11 @@ func (a *Agent) ActiveRulesContent() string {
 // IgnoreList returns the agent's ignore list (may be nil).
 func (a *Agent) IgnoreList() *IgnoreList {
 	return a.ignoreList
+}
+
+// MCPManager returns the agent's MCP manager (may be nil).
+func (a *Agent) MCPManager() *mcp.Manager {
+	return a.mcpManager
 }
 
 // refreshActiveRules updates the system prompt with rules matching recently accessed files.

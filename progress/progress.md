@@ -377,6 +377,23 @@
 
 ## Phase 12: Advanced Features
 
+### Phase 12.2: MCP (Model Context Protocol) Support
+- [x] `internal/mcp/client.go` — MCPClient, MCPTool, MCPServerConfig, Manager
+- [x] SSE transport — connect to SSE endpoint, discover message URL, send JSON-RPC via HTTP POST, receive responses via SSE
+- [x] Stdio transport — spawn process, JSON-RPC via stdin/stdout
+- [x] JSON-RPC 2.0 protocol — initialize handshake, capability negotiation, tools/list, tools/call
+- [x] Manager — ConnectAll, Client, AllTools, Clients, CloseAll
+- [x] `internal/agent/mcptools.go` — MCPToolsFromManager, MCPToolPermissions, FormatMCPToolsPrompt, FormatMCPToolPreview, WithMCPManager
+- [x] MCP tools registered alongside built-in tools with "mcp_<server>_<tool>" prefix
+- [x] All MCP tools default to PermConfirm
+- [x] MCP tool descriptions included in system prompt
+- [x] `internal/config/config.go` — MCPConfig struct with `mcp.servers` YAML config
+- [x] `internal/cli/mcp.go` — `openmarmut mcp list`, `openmarmut mcp add <name> <url>`, `openmarmut mcp test <name>`
+- [x] `internal/cli/chat.go` — MCP wiring: connect on chat start, /mcp slash command, MCP status in welcome banner, cleanup on exit
+- [x] `internal/mcp/client_test.go` — 25 tests (SSE connect/list/call, error handling, not connected, close, cached tools, manager, concurrent, timeout, JSON-RPC, config, URL resolution)
+- [x] `internal/agent/mcptools_test.go` — 8 tests (nil manager, permissions, prompt formatting, preview, schema parsing)
+- [x] All 19 packages pass
+
 ### Phase 12.1: Sub-agents — Isolated Agent Instances
 - [x] `internal/agent/subagent.go` — SubAgent struct, SubAgentOpts, SpawnSubAgent (synchronous), SubAgentManager (async + tracking + kill)
 - [x] Isolated context — sub-agent gets own Agent instance with fresh history, shared Runtime
@@ -451,5 +468,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 11.5 | Project memory, rules, skills, auto-memory, and ignore system: (1) OPENMARMUT.md project instruction loading with ancestor walking, global instructions, @ imports, content cap — 16 tests; (2) .openmarmut/rules/ glob-based rule system with dynamic activation — 22 tests; (3) .openmarmut/skills/ on-demand skill system with manual/auto triggers — 12 tests; (4) Auto-memory with per-project tagging, LLM-based extraction on session exit, /memory off|edit, config support — ~20 tests; (5) .openmarmutignore with .gitignore loading, default patterns, tool integration (grep/find/list_dir filtering), /ignore add|remove, pattern source tracking — ~25 tests. All 18 packages pass. | Done
 
 2026-03-15 | Phase 12.1 | Sub-agent system: SubAgent struct with isolated context, SpawnSubAgent (sync), SubAgentManager (async+track+kill), spawn_subagent LLM tool with WithSubAgentProvider, /agent slash command with --provider/--name flags, /agents list+kill commands, FormatToolPreview for spawn_subagent, 22 sub-agent tests + 7 chat tests. All 18 packages pass. | Done
+
+2026-03-15 | Phase 12.2 | MCP support: internal/mcp package with SSE and stdio transports, JSON-RPC 2.0 protocol (initialize, tools/list, tools/call), Manager for multi-server connections, MCPToolsFromManager for agent integration with prefixed names, MCPConfig in config, CLI commands (mcp list/add/test), /mcp slash command in chat, MCP status in welcome banner. 33 new tests (25 mcp + 8 agent). All 19 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->
