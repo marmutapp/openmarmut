@@ -60,6 +60,10 @@ type chatState struct {
 	customCommands   []agent.CustomCommand // custom slash commands from .openmarmut/commands/.
 	loopMgr          *loopManager     // /loop background task manager.
 	customCmdContent string           // set by tryCustomCommand to replace user's line.
+	taskList         *agent.TaskList  // persistent task list for /tasks.
+	bgJobs           []*bgJob         // background execution jobs.
+	bgMu             sync.Mutex       // protects bgJobs.
+	bgNextID         int              // next background job ID.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -156,6 +160,26 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return slashHandled
 	}
 
+	if strings.HasPrefix(line, "/tasks") {
+		handleTasks(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/bg") {
+		handleBg(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/model") {
+		handleModel(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/provider") {
+		handleProvider(line, state)
+		return slashHandled
+	}
+
 	if strings.HasPrefix(line, "/plan") {
 		return handlePlan(line, state)
 	}
@@ -236,6 +260,16 @@ func renderHelpBox(w io.Writer) {
 		{"/loop <int> <cmd>", "Run command on interval (e.g., /loop 5m go test)"},
 		{"/loop status", "Show active loops"},
 		{"/loop off", "Stop all loops"},
+		{"/tasks", "Show tracked tasks"},
+		{"/tasks add <title>", "Add a new task"},
+		{"/tasks done <id>", "Mark task as completed"},
+		{"/tasks clear", "Remove completed tasks"},
+		{"/bg <task>", "Run task in background sub-agent"},
+		{"/bg status", "Show background jobs"},
+		{"/bg cancel <id>", "Cancel a background job"},
+		{"/model", "Show current model"},
+		{"/model <name>", "Switch model for this session"},
+		{"/provider <name>", "Switch provider for this session"},
 		{"/commands", "List custom commands from .openmarmut/commands/"},
 		{"/sessions", "List recent sessions"},
 		{"/rename <name>", "Rename current session"},
@@ -1094,6 +1128,338 @@ func handleLoop(line string, state *chatState) {
 		fmt.Sprintf("Loop #%d started: %q every %s", id, command, interval)))
 }
 
+// --- /tasks Slash Command ---
+
+// handleTasks processes /tasks commands.
+// /tasks — show all tasks.
+// /tasks add <title> — add a new task.
+// /tasks done <id> — mark a task as completed.
+// /tasks clear — remove completed tasks.
+func handleTasks(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/tasks"))
+
+	if state.taskList == nil {
+		fmt.Fprintln(state.out, ui.FormatHint("No task list active."))
+		return
+	}
+
+	if arg == "" {
+		tasks := state.taskList.All()
+		if len(tasks) == 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("No tasks. Use /tasks add <title> to create one."))
+			return
+		}
+		fmt.Fprint(state.out, agent.FormatTaskList(tasks))
+		return
+	}
+
+	if strings.HasPrefix(arg, "add ") {
+		title := strings.TrimSpace(strings.TrimPrefix(arg, "add"))
+		if title == "" {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /tasks add <title>"))
+			return
+		}
+		task := state.taskList.Add(title)
+		state.taskList.Save() //nolint:errcheck
+		fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Created task #%d: %s", task.ID, task.Title)))
+		return
+	}
+
+	if strings.HasPrefix(arg, "done ") {
+		idStr := strings.TrimSpace(strings.TrimPrefix(arg, "done"))
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id < 1 {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /tasks done <id>"))
+			return
+		}
+		if err := state.taskList.Update(id, "completed"); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError(err.Error()))
+			return
+		}
+		state.taskList.Save() //nolint:errcheck
+		fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Task #%d marked as completed.", id)))
+		return
+	}
+
+	if arg == "clear" {
+		removed := state.taskList.ClearCompleted()
+		state.taskList.Save() //nolint:errcheck
+		fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Cleared %d completed task(s).", removed)))
+		return
+	}
+
+	fmt.Fprintln(state.out, ui.FormatWarning("Usage: /tasks, /tasks add <title>, /tasks done <id>, /tasks clear"))
+}
+
+// --- /bg Background Execution ---
+
+// bgJob tracks a background sub-agent execution.
+type bgJob struct {
+	ID       int
+	Task     string
+	Status   string // "running", "completed", "failed", "cancelled"
+	Result   string
+	cancel   context.CancelFunc
+}
+
+// handleBg processes /bg commands.
+// /bg <task> — run task in background.
+// /bg status — show background jobs.
+// /bg cancel <id> — cancel a background job.
+func handleBg(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/bg"))
+
+	if arg == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /bg <task>, /bg status, /bg cancel <id>"))
+		return
+	}
+
+	if arg == "status" {
+		state.bgMu.Lock()
+		jobs := make([]*bgJob, len(state.bgJobs))
+		copy(jobs, state.bgJobs)
+		state.bgMu.Unlock()
+
+		if len(jobs) == 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("No background jobs."))
+			return
+		}
+
+		headers := []string{"ID", "STATUS", "TASK"}
+		var rows [][]string
+		for _, j := range jobs {
+			task := j.Task
+			if len(task) > 60 {
+				task = task[:60] + "..."
+			}
+			rows = append(rows, []string{
+				fmt.Sprintf("%d", j.ID),
+				j.Status,
+				task,
+			})
+		}
+		fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+		return
+	}
+
+	if strings.HasPrefix(arg, "cancel ") {
+		idStr := strings.TrimSpace(strings.TrimPrefix(arg, "cancel"))
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id < 1 {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /bg cancel <id>"))
+			return
+		}
+
+		state.bgMu.Lock()
+		var found *bgJob
+		for _, j := range state.bgJobs {
+			if j.ID == id {
+				found = j
+				break
+			}
+		}
+		state.bgMu.Unlock()
+
+		if found == nil {
+			fmt.Fprintln(state.out, ui.FormatWarning(fmt.Sprintf("No background job #%d.", id)))
+			return
+		}
+		if found.Status != "running" {
+			fmt.Fprintln(state.out, ui.FormatHint(fmt.Sprintf("Job #%d is already %s.", id, found.Status)))
+			return
+		}
+		found.cancel()
+		found.Status = "cancelled"
+		fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Cancelled background job #%d.", id)))
+		return
+	}
+
+	// /bg <task> — spawn background sub-agent.
+	task := strings.Trim(arg, "\"'")
+	if task == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /bg <task>"))
+		return
+	}
+
+	provider := state.provider
+	if provider == nil {
+		fmt.Fprintln(state.out, ui.FormatError("No LLM provider configured."))
+		return
+	}
+
+	state.bgMu.Lock()
+	state.bgNextID++
+	job := &bgJob{
+		ID:     state.bgNextID,
+		Task:   task,
+		Status: "running",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	job.cancel = cancel
+	state.bgJobs = append(state.bgJobs, job)
+	state.bgMu.Unlock()
+
+	fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Background job #%d started: %s", job.ID, task)))
+
+	go func() {
+		defer cancel()
+		sa, err := agent.SpawnSubAgent(ctx, agent.SubAgentOpts{
+			Name:       fmt.Sprintf("bg-%d", job.ID),
+			Task:       task,
+			Provider:   provider,
+			Runtime:    state.rt,
+			Logger:     state.log,
+			IgnoreList: state.ag.IgnoreList(),
+			Config:     state.cfg,
+		})
+
+		state.bgMu.Lock()
+		defer state.bgMu.Unlock()
+
+		if job.Status == "cancelled" {
+			return
+		}
+
+		if err != nil {
+			job.Status = "failed"
+			job.Result = err.Error()
+			fmt.Fprintf(state.out, "\a[bg #%d] FAILED: %s\n", job.ID, err.Error())
+			return
+		}
+
+		job.Status = "completed"
+		job.Result = sa.Result
+		fmt.Fprintf(state.out, "\a[bg #%d] DONE (%d tokens): %s\n", job.ID, sa.Usage.TotalTokens,
+			truncatePreviewStr(sa.Result, 120))
+	}()
+}
+
+// truncatePreviewStr truncates a string for display.
+func truncatePreviewStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// --- /model and /provider Slash Commands ---
+
+// handleModel processes /model commands.
+// /model — show current model and provider.
+// /model <name> — switch model for this session.
+func handleModel(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/model"))
+
+	if arg == "" {
+		fmt.Fprintln(state.out, ui.RenderBox("Current Model",
+			fmt.Sprintf("Provider: %s\nModel:    %s", state.provider.Name(), state.model)))
+		return
+	}
+
+	// Find a provider entry with the given model name.
+	if state.cfg == nil {
+		fmt.Fprintln(state.out, ui.FormatError("No config available for model switching."))
+		return
+	}
+
+	// Search across providers for the model name.
+	var matchEntry *llm.ProviderEntry
+	for i := range state.cfg.LLM.Providers {
+		if state.cfg.LLM.Providers[i].ModelName == arg {
+			matchEntry = &state.cfg.LLM.Providers[i]
+			break
+		}
+	}
+
+	if matchEntry == nil {
+		// Try creating a new entry with current provider type but different model.
+		currentEntry := state.cfg.LLM.FindProvider(state.provider.Name())
+		if currentEntry == nil {
+			fmt.Fprintln(state.out, ui.FormatError("Cannot resolve current provider for model switch."))
+			return
+		}
+		modified := *currentEntry
+		modified.ModelName = arg
+		matchEntry = &modified
+	}
+
+	newProvider, err := llm.NewProvider(*matchEntry, state.log)
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("Failed to create provider: "+err.Error()))
+		return
+	}
+	newProvider = llm.NewRetryProvider(newProvider, llm.RetryConfig{}, state.log)
+
+	state.provider = newProvider
+	state.model = newProvider.Model()
+
+	// Persist model in session.
+	if state.sess != nil {
+		state.sess.Model = state.model
+		state.sess.Provider = newProvider.Name()
+		go session.Save(state.sess) //nolint:errcheck
+	}
+
+	fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Switched to model: %s (%s)", state.model, newProvider.Name())))
+}
+
+// handleProvider processes /provider commands.
+// /provider <name> — switch to a configured provider.
+func handleProvider(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/provider"))
+
+	if arg == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /provider <name>"))
+		if state.cfg != nil {
+			var names []string
+			for _, p := range state.cfg.LLM.Providers {
+				names = append(names, p.Name)
+			}
+			if len(names) > 0 {
+				fmt.Fprintln(state.out, ui.FormatHint("Available: "+strings.Join(names, ", ")))
+			}
+		}
+		return
+	}
+
+	if state.cfg == nil {
+		fmt.Fprintln(state.out, ui.FormatError("No config available for provider switching."))
+		return
+	}
+
+	entry := state.cfg.LLM.FindProvider(arg)
+	if entry == nil {
+		fmt.Fprintln(state.out, ui.FormatError(fmt.Sprintf("Provider '%s' not found.", arg)))
+		var names []string
+		for _, p := range state.cfg.LLM.Providers {
+			names = append(names, p.Name)
+		}
+		if len(names) > 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("Available: "+strings.Join(names, ", ")))
+		}
+		return
+	}
+
+	newProvider, err := llm.NewProvider(*entry, state.log)
+	if err != nil {
+		fmt.Fprintln(state.out, ui.FormatError("Failed to create provider: "+err.Error()))
+		return
+	}
+	newProvider = llm.NewRetryProvider(newProvider, llm.RetryConfig{}, state.log)
+
+	state.provider = newProvider
+	state.model = newProvider.Model()
+
+	// Persist in session.
+	if state.sess != nil {
+		state.sess.Provider = newProvider.Name()
+		state.sess.Model = state.model
+		go session.Save(state.sess) //nolint:errcheck
+	}
+
+	fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Switched to provider: %s (%s)", newProvider.Name(), state.model)))
+}
+
 func newChatCmd(runner *Runner) *cobra.Command {
 	var (
 		continueFlag bool
@@ -1229,6 +1595,14 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			// Enable sub-agent spawning via tool call.
 			opts = append(opts, agent.WithSubAgentProvider(provider, log))
 
+			// Pre-generate session ID for task list.
+			preSessionID := session.NewID()
+			taskList := agent.NewTaskList(preSessionID)
+			if taskList != nil {
+				taskList.Load() //nolint:errcheck
+				opts = append(opts, agent.WithTaskList(taskList))
+			}
+
 			// Connect to MCP servers.
 			var mcpMgr *mcp.Manager
 			if len(cfg.MCP.Servers) > 0 {
@@ -1270,6 +1644,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			state.log = log
 			state.mcpMgr = mcpMgr
 			state.customCommands = customCmds
+			state.taskList = taskList
 			if mcpMgr != nil {
 				defer mcpMgr.CloseAll()
 			}
@@ -1319,7 +1694,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			} else {
 				// Create new session.
 				sess = &session.Session{
-					ID:        session.NewID(),
+					ID:        preSessionID,
 					Name:      sessionName,
 					CreatedAt: time.Now(),
 					UpdatedAt: time.Now(),

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gajaai/openmarmut-go/internal/agent"
+	"github.com/gajaai/openmarmut-go/internal/config"
 	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/runtime"
 	"github.com/gajaai/openmarmut-go/internal/ui"
@@ -1140,6 +1141,194 @@ func TestSlashCommands_NeverCallProvider_IncludesNewCommands(t *testing.T) {
 	state, _ := newTestState()
 	newCommands := []string{"/commands", "/loop status", "/loop off"}
 	for _, cmd := range newCommands {
+		t.Run(cmd, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				handleSlashCommand(cmd, state)
+			}, "slash command %q should not call the LLM provider", cmd)
+		})
+	}
+}
+
+// --- Phase 12.4: Task Tracking Tests ---
+
+func TestSlashTasks_Empty(t *testing.T) {
+	state, buf := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+
+	action := handleSlashCommand("/tasks", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No tasks")
+}
+
+func TestSlashTasks_Add(t *testing.T) {
+	state, buf := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+
+	action := handleSlashCommand("/tasks add Write unit tests", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Created task #1")
+
+	// Verify task was actually created.
+	tasks := tl.All()
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "Write unit tests", tasks[0].Title)
+}
+
+func TestSlashTasks_Done(t *testing.T) {
+	state, buf := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+	tl.Add("Complete me")
+
+	action := handleSlashCommand("/tasks done 1", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "completed")
+	assert.Equal(t, "completed", tl.Get(1).Status)
+}
+
+func TestSlashTasks_DoneInvalidID(t *testing.T) {
+	state, buf := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+
+	action := handleSlashCommand("/tasks done 99", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "not found")
+}
+
+func TestSlashTasks_Clear(t *testing.T) {
+	state, buf := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+	tl.Add("Done task")
+	tl.Add("Pending task")
+	tl.Update(1, "completed") //nolint:errcheck
+
+	action := handleSlashCommand("/tasks clear", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Cleared 1 completed")
+	assert.Equal(t, 1, tl.Len())
+}
+
+func TestSlashTasks_ShowWithTasks(t *testing.T) {
+	state, buf := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+	tl.Add("Task A")
+	tl.Add("Task B")
+
+	action := handleSlashCommand("/tasks", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Task A")
+	assert.Contains(t, buf.String(), "Task B")
+}
+
+func TestSlashTasks_NoTaskList(t *testing.T) {
+	state, buf := newTestState()
+	// state.taskList is nil
+
+	action := handleSlashCommand("/tasks", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No task list")
+}
+
+func TestSlashTasks_AddEmptyTitle(t *testing.T) {
+	state, buf := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+
+	action := handleSlashCommand("/tasks add ", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+// --- Phase 12.4: Background Execution Tests ---
+
+func TestSlashBg_EmptyUsage(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/bg", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashBg_StatusEmpty(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/bg status", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No background jobs")
+}
+
+func TestSlashBg_CancelInvalidID(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/bg cancel 99", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No background job")
+}
+
+// --- Phase 12.4: Model Switching Tests ---
+
+func TestSlashModel_ShowCurrent(t *testing.T) {
+	state, buf := newTestState()
+	state.provider = &panicProvider{}
+	state.model = "panic-model"
+
+	action := handleSlashCommand("/model", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "panic-model")
+	assert.Contains(t, buf.String(), "panic") // provider name
+}
+
+func TestSlashModel_SwitchNoConfig(t *testing.T) {
+	state, buf := newTestState()
+	state.provider = &panicProvider{}
+	state.cfg = nil
+
+	action := handleSlashCommand("/model gpt-4", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No config")
+}
+
+func TestSlashProvider_EmptyUsage(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/provider", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashProvider_NotFound(t *testing.T) {
+	state, buf := newTestState()
+	state.cfg = &config.Config{
+		LLM: config.LLMConfig{
+			Providers: []llm.ProviderEntry{
+				{Name: "openai", Type: "openai", ModelName: "gpt-4"},
+			},
+		},
+	}
+
+	action := handleSlashCommand("/provider nonexistent", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "not found")
+}
+
+// --- Phase 12.4: No-LLM Guarantee ---
+
+func TestPhase12_4_SlashCommands_NoLLMCall(t *testing.T) {
+	state, _ := newTestState()
+	tl := agent.NewTaskListAt(filepath.Join(t.TempDir(), "tasks.json"))
+	state.taskList = tl
+	state.provider = &panicProvider{}
+
+	commands := []string{
+		"/tasks",
+		"/tasks add test",
+		"/tasks clear",
+		"/bg status",
+		"/model",
+		"/provider",
+	}
+	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
 			require.NotPanics(t, func() {
 				handleSlashCommand(cmd, state)

@@ -69,6 +69,9 @@ func DefaultPermissions() map[string]PermissionLevel {
 		"git_branch":       PermConfirm,
 		"git_checkout":     PermConfirm,
 		"spawn_subagent":   PermConfirm,
+		"task_create":      PermAuto,
+		"task_update":      PermAuto,
+		"task_list":        PermAuto,
 	}
 }
 

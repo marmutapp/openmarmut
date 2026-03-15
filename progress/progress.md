@@ -413,6 +413,27 @@
 - [x] 7 new chat tests (agents list empty, agents with entries, agents kill no manager, agents kill nonexistent, agent missing task, help includes agent, commands never call provider)
 - [x] All 18 packages pass
 
+### Phase 12.4: Task Tracking, Background Execution, Multi-Model Switching
+- [x] `internal/agent/tasks.go` — Task struct, TaskList (CRUD, JSON persistence, atomic save), FormatTaskList, statusIcon
+- [x] TaskTools — task_create, task_update, task_list agent tools (PermAuto)
+- [x] WithTaskList agent option — registers task tools in Agent.New()
+- [x] task_list added to readOnlyTools for plan mode
+- [x] System prompt updated with task tool descriptions
+- [x] `/tasks` slash command — show tasks, /tasks add, /tasks done, /tasks clear
+- [x] `/bg <task>` — background sub-agent execution via goroutine
+- [x] `/bg status` — show background jobs (ID, status, task)
+- [x] `/bg cancel <id>` — cancel running background job
+- [x] `/model` — show current provider and model
+- [x] `/model <name>` — switch model for session (persists in session file)
+- [x] `/provider <name>` — switch provider for session (persists in session file)
+- [x] `/effort` — already exists from Phase 11.4 (no new work needed)
+- [x] `.openmarmutignore` — already works with grep_files/find_files from Phase 11.5
+- [x] Task list wired in newChatCmd with pre-generated session ID
+- [x] `/help` updated with /tasks, /bg, /model, /provider entries
+- [x] `internal/agent/tasks_test.go` — 14 tests (CRUD, persistence, tools, concurrent)
+- [x] `internal/cli/chat_test.go` — 15 new tests (tasks CRUD, bg status/cancel, model/provider display/switch)
+- [x] All 19 packages pass
+
 ### Phase 12.3: Custom Commands, /btw Side Questions, /loop Mode
 - [x] `internal/agent/commands.go` — CustomCommand struct, LoadCustomCommands, parseCustomCommand, FindCustomCommand, FormatCustomCommandsList
 - [x] Custom command loading from .openmarmut/commands/*.md with YAML frontmatter (description field)
@@ -492,5 +513,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 12.2 | MCP support: internal/mcp package with SSE and stdio transports, JSON-RPC 2.0 protocol (initialize, tools/list, tools/call), Manager for multi-server connections, MCPToolsFromManager for agent integration with prefixed names, MCPConfig in config, CLI commands (mcp list/add/test), /mcp slash command in chat, MCP status in welcome banner. 33 new tests (25 mcp + 8 agent). All 19 packages pass. | Done
 
 2026-03-15 | Phase 12.3 | Custom commands (.openmarmut/commands/*.md with frontmatter, args support), /btw side questions (isolated LLM request, no history pollution, styled box), /loop mode (background recurring tasks via goroutine, status/off, bell on failure, multiple simultaneous loops), /commands listing. 12 agent tests + 20 chat tests. All 19 packages pass. | Done
+
+2026-03-15 | Phase 12.4 | Task tracking, background execution, multi-model switching. (1) Task tracking — TaskList with JSON persistence, 3 agent tools (task_create/update/list as PermAuto), /tasks slash command (add/done/clear), task_list in readOnlyTools; (2) Background execution — /bg spawns sub-agent in goroutine, /bg status, /bg cancel; (3) Multi-model switching — /model (show/switch), /provider (switch), session persistence on switch. 18 agent tests + 15 chat tests. All 19 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->

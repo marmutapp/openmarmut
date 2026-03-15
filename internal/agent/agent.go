@@ -27,6 +27,7 @@ var readOnlyTools = map[string]bool{
 	"git_diff":        true,
 	"git_diff_staged":  true,
 	"git_log":         true,
+	"task_list":       true,
 }
 
 const planSystemPrompt = `You are an AI coding assistant in PLAN MODE. You are analyzing a project to create a detailed implementation plan.
@@ -91,6 +92,9 @@ Available tools:
 - git_branch: List branches or create a new one.
 - git_checkout: Switch to a different branch.
 - spawn_subagent: Spawn an isolated sub-agent for a subtask (own history, same tools).
+- task_create: Create a new task to track progress (returns task ID).
+- task_update: Update a task's status (pending, in_progress, completed, failed).
+- task_list: List all tracked tasks with their status.
 
 The project is located at: %s
 
@@ -158,6 +162,7 @@ type Agent struct {
 	subAgentProvider     llm.Provider
 	subAgentLogger       *slog.Logger
 	mcpManager           *mcp.Manager
+	taskList             *TaskList
 }
 
 // Option configures the Agent.
@@ -233,6 +238,11 @@ func WithIgnoreList(il *IgnoreList) Option {
 	return func(a *Agent) { a.ignoreList = il }
 }
 
+// WithTaskList sets the task list for task tracking tools.
+func WithTaskList(tl *TaskList) Option {
+	return func(a *Agent) { a.taskList = tl }
+}
+
 // WithExtendedThinking enables extended thinking / reasoning tokens.
 func WithExtendedThinking(enabled bool, budget int) Option {
 	return func(a *Agent) {
@@ -268,6 +278,10 @@ func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ..
 	tools := DefaultTools(a.ignoreList)
 	// Add spawn_subagent tool (configured after agent construction).
 	tools = append(tools, spawnSubAgentTool())
+	// Add task tools if a task list is configured.
+	if a.taskList != nil {
+		tools = append(tools, TaskTools(a.taskList)...)
+	}
 	toolMap := make(map[string]Tool, len(tools))
 	for _, t := range tools {
 		toolMap[t.Def.Name] = t
