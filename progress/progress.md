@@ -516,4 +516,6 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 
 2026-03-15 | Phase 12.4 | Task tracking, background execution, multi-model switching. (1) Task tracking — TaskList with JSON persistence, 3 agent tools (task_create/update/list as PermAuto), /tasks slash command (add/done/clear), task_list in readOnlyTools; (2) Background execution — /bg spawns sub-agent in goroutine, /bg status, /bg cancel; (3) Multi-model switching — /model (show/switch), /provider (switch), session persistence on switch. 18 agent tests + 15 chat tests. All 19 packages pass. | Done
 
+2026-03-15 | Docs | Comprehensive test suite (docs/full-test-suite.md) covering all 14 feature areas across Phases 1–12: core runtime, LLM providers, agent loop, chat REPL, session persistence, project memory, plan mode, git integration, context management, sub-agents, MCP, advanced features, UI/UX, configuration. 90+ manual tests, 550+ unit tests referenced. All 19 packages pass, binary builds clean. | Done
+
 <!-- Claude: append a new line here after each working session -->
