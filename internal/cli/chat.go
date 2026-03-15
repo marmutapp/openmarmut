@@ -51,6 +51,9 @@ type chatState struct {
 	provider     llm.Provider     // LLM provider for memory extraction.
 	targetDir    string           // target directory for project tagging.
 	autoMemory   bool             // config: auto_memory enabled.
+	subMgr       *agent.SubAgentManager // sub-agent tracker.
+	cfg          *config.Config   // config for sub-agent context settings.
+	log          *slog.Logger     // logger for sub-agent spawning.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -122,6 +125,16 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return slashHandled
 	}
 
+	if strings.HasPrefix(line, "/agents") {
+		handleAgents(line, state)
+		return slashHandled
+	}
+
+	if strings.HasPrefix(line, "/agent ") {
+		handleAgent(line, state)
+		return slashHandled
+	}
+
 	if strings.HasPrefix(line, "/plan") {
 		return handlePlan(line, state)
 	}
@@ -187,6 +200,9 @@ func renderHelpBox(w io.Writer) {
 		{"/ignore", "Show current ignore patterns"},
 		{"/ignore add <pat>", "Add pattern to .openmarmutignore"},
 		{"/ignore remove <pat>", "Remove pattern from .openmarmutignore"},
+		{"/agent <task>", "Spawn a sub-agent for a task"},
+		{"/agents", "List sub-agents in this session"},
+		{"/agents kill <name>", "Stop a running sub-agent"},
 		{"/sessions", "List recent sessions"},
 		{"/rename <name>", "Rename current session"},
 		{"/help", "Show this help"},
@@ -578,6 +594,161 @@ func interactiveConfirm(state *chatState) agent.ConfirmFunc {
 	}
 }
 
+// handleAgent processes the /agent slash command.
+// Usage: /agent "task description"
+//        /agent --provider <name> "task description"
+//        /agent --name <name> "task description"
+func handleAgent(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/agent"))
+	if arg == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /agent [--provider <name>] [--name <name>] <task>"))
+		return
+	}
+
+	// Parse flags.
+	var providerName, agentName string
+	parts := strings.Fields(arg)
+	var taskParts []string
+	for i := 0; i < len(parts); i++ {
+		switch parts[i] {
+		case "--provider":
+			if i+1 < len(parts) {
+				i++
+				providerName = parts[i]
+			}
+		case "--name":
+			if i+1 < len(parts) {
+				i++
+				agentName = parts[i]
+			}
+		default:
+			taskParts = append(taskParts, parts[i])
+		}
+	}
+	task := strings.Join(taskParts, " ")
+	// Strip surrounding quotes if present.
+	task = strings.Trim(task, "\"'")
+	if task == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /agent <task>"))
+		return
+	}
+
+	// Resolve provider.
+	provider := state.provider
+	if providerName != "" && state.cfg != nil {
+		entry := state.cfg.LLM.FindProvider(providerName)
+		if entry == nil {
+			fmt.Fprintln(state.out, ui.FormatError(fmt.Sprintf("Provider '%s' not found.", providerName)))
+			return
+		}
+		p, err := llm.NewProvider(*entry, state.log)
+		if err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to create provider: "+err.Error()))
+			return
+		}
+		provider = p
+	}
+
+	// Show sub-agent start box.
+	name := agentName
+	if name == "" {
+		name = "sub-agent"
+	}
+	fmt.Fprintf(state.out, "%s\n", ui.RenderBox(
+		fmt.Sprintf("Sub-agent: %s", name),
+		fmt.Sprintf("Task: %s\nProvider: %s (%s)\nStatus: Running...",
+			task, provider.Name(), provider.Model()),
+	))
+
+	// Spin up the sub-agent synchronously.
+	spin := ui.NewSpinner(state.out, "Sub-agent working...")
+	spin.Start()
+
+	sa, err := agent.SpawnSubAgent(context.Background(), agent.SubAgentOpts{
+		Name:       agentName,
+		Task:       task,
+		Provider:   provider,
+		Runtime:    state.rt,
+		Logger:     state.log,
+		IgnoreList: state.ag.IgnoreList(),
+		Config:     state.cfg,
+	})
+	spin.Stop()
+
+	if state.subMgr != nil {
+		// Track in the manager even for synchronous spawns.
+		state.subMgr.Track(sa)
+	}
+
+	if err != nil {
+		fmt.Fprintf(state.out, "%s\n", ui.FormatError("Sub-agent failed: "+err.Error()))
+		return
+	}
+
+	// Show completion box.
+	fmt.Fprintf(state.out, "%s\n", ui.RenderBox(
+		fmt.Sprintf("Sub-agent: %s — completed", sa.Name),
+		fmt.Sprintf("%s\n[%d tool calls │ %d tokens │ %s]",
+			sa.Result,
+			sa.Steps,
+			sa.Usage.TotalTokens,
+			sa.Duration.Round(time.Millisecond)),
+	))
+}
+
+// handleAgents processes the /agents slash command.
+// Usage: /agents          — list all sub-agents in this session
+//        /agents kill <n> — stop a running sub-agent
+func handleAgents(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/agents"))
+
+	if state.subMgr == nil {
+		fmt.Fprintln(state.out, ui.FormatHint("No sub-agents have been spawned in this session."))
+		return
+	}
+
+	if strings.HasPrefix(arg, "kill ") {
+		name := strings.TrimSpace(strings.TrimPrefix(arg, "kill"))
+		if name == "" {
+			fmt.Fprintln(state.out, ui.FormatWarning("Usage: /agents kill <name>"))
+			return
+		}
+		if state.subMgr.Kill(name) {
+			fmt.Fprintln(state.out, ui.FormatSuccess("Killed sub-agent: "+name))
+		} else {
+			fmt.Fprintln(state.out, ui.FormatWarning("No running sub-agent named: "+name))
+		}
+		return
+	}
+
+	agents := state.subMgr.List()
+	if len(agents) == 0 {
+		fmt.Fprintln(state.out, ui.FormatHint("No sub-agents have been spawned in this session."))
+		return
+	}
+
+	headers := []string{"NAME", "STATUS", "TASK", "TOKENS", "DURATION"}
+	var rows [][]string
+	for _, sa := range agents {
+		task := sa.Task
+		if len(task) > 50 {
+			task = task[:50] + "..."
+		}
+		dur := ""
+		if sa.Duration > 0 {
+			dur = sa.Duration.Round(time.Millisecond).String()
+		}
+		rows = append(rows, []string{
+			sa.Name,
+			sa.Status,
+			task,
+			fmt.Sprintf("%d", sa.Usage.TotalTokens),
+			dur,
+		})
+	}
+	fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+}
+
 func newChatCmd(runner *Runner) *cobra.Command {
 	var (
 		continueFlag bool
@@ -707,6 +878,9 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				}
 			}
 
+			// Enable sub-agent spawning via tool call.
+			opts = append(opts, agent.WithSubAgentProvider(provider, log))
+
 			ag := agent.New(provider, rt, log, opts...)
 
 			state.ag = ag
@@ -715,6 +889,9 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			state.provider = provider
 			state.targetDir = cfg.TargetDir
 			state.autoMemory = cfg.Agent.AutoMemory
+			state.subMgr = agent.NewSubAgentManager()
+			state.cfg = cfg
+			state.log = log
 
 			// Detect git repo for dirty state warning and /diff+/commit.
 			state.isGitRepo = isGitRepo(cmd.Context(), rt)

@@ -89,6 +89,7 @@ Available tools:
 - git_commit: Stage all changes and commit with a message.
 - git_branch: List branches or create a new one.
 - git_checkout: Switch to a different branch.
+- spawn_subagent: Spawn an isolated sub-agent for a subtask (own history, same tools).
 
 The project is located at: %s
 
@@ -153,6 +154,8 @@ type Agent struct {
 	skills               []Skill
 	memory               *MemoryStore
 	ignoreList           *IgnoreList
+	subAgentProvider     llm.Provider
+	subAgentLogger       *slog.Logger
 }
 
 // Option configures the Agent.
@@ -261,12 +264,17 @@ func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ..
 
 	// Build tools after options are applied so ignoreList is available.
 	tools := DefaultTools(a.ignoreList)
+	// Add spawn_subagent tool (configured after agent construction).
+	tools = append(tools, spawnSubAgentTool())
 	toolMap := make(map[string]Tool, len(tools))
 	for _, t := range tools {
 		toolMap[t.Def.Name] = t
 	}
 	a.tools = tools
 	a.toolMap = toolMap
+
+	// Configure the spawn_subagent tool's Execute function now that the agent is built.
+	a.configureSubAgentTool()
 
 	if a.systemPrompt == "" {
 		base := fmt.Sprintf(defaultSystemPrompt, rt.TargetDir())

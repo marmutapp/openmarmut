@@ -165,7 +165,7 @@ func TestSlashCommands_NeverCallProvider(t *testing.T) {
 	// the test panics instead of failing gracefully.
 	state, _ := newTestState()
 
-	commands := []string{"/help", "/tools", "/cost", "/context", "/clear", "/quit", "/exit", "/sessions", "/rewind --list", "/diff", "/plan", "/plan on", "/plan off", "/unknown"}
+	commands := []string{"/help", "/tools", "/cost", "/context", "/clear", "/quit", "/exit", "/sessions", "/rewind --list", "/diff", "/plan", "/plan on", "/plan off", "/agents", "/unknown"}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
 			require.NotPanics(t, func() {
@@ -835,4 +835,79 @@ func TestRenderMemory_WithEmptyStore(t *testing.T) {
 	// Should show "No memories stored yet" not "not enabled".
 	assert.Contains(t, buf.String(), "No memories stored yet")
 	assert.NotContains(t, buf.String(), "not enabled")
+}
+
+// --- Sub-agent slash command tests ---
+
+func TestSlashAgents_EmptyList(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/agents", state)
+
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No sub-agents")
+}
+
+func TestSlashAgents_WithManager(t *testing.T) {
+	state, buf := newTestState()
+	state.subMgr = agent.NewSubAgentManager()
+	state.subMgr.Track(&agent.SubAgent{
+		Name:   "test-agent",
+		Task:   "Find TODO comments",
+		Status: "completed",
+		Usage:  llm.Usage{TotalTokens: 150},
+	})
+
+	action := handleSlashCommand("/agents", state)
+
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "test-agent")
+	assert.Contains(t, buf.String(), "completed")
+	assert.Contains(t, buf.String(), "Find TODO")
+}
+
+func TestSlashAgentsKill_NoManager(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/agents kill test", state)
+
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No sub-agents")
+}
+
+func TestSlashAgentsKill_NonExistent(t *testing.T) {
+	state, buf := newTestState()
+	state.subMgr = agent.NewSubAgentManager()
+	action := handleSlashCommand("/agents kill nonexistent", state)
+
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "No running sub-agent")
+}
+
+func TestSlashAgent_MissingTask(t *testing.T) {
+	state, buf := newTestState()
+	action := handleSlashCommand("/agent ", state)
+
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Usage")
+}
+
+func TestSlashHelp_IncludesAgent(t *testing.T) {
+	state, buf := newTestState()
+	handleSlashCommand("/help", state)
+	output := buf.String()
+
+	assert.Contains(t, output, "/agent")
+	assert.Contains(t, output, "/agents")
+	assert.Contains(t, output, "sub-agent")
+}
+
+func TestSlashCommands_NeverCallProvider_IncludesAgents(t *testing.T) {
+	state, _ := newTestState()
+	commands := []string{"/agents", "/agents kill test"}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				handleSlashCommand(cmd, state)
+			}, "slash command %q should not call the LLM provider", cmd)
+		})
+	}
 }

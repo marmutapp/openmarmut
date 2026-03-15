@@ -375,6 +375,27 @@
 - [x] ~25 tests (loading, defaults, gitignore, combined ordering, dir/file patterns, entry filtering, display, add/remove, tool integration, OS loading)
 - [x] All 18 packages pass
 
+## Phase 12: Advanced Features
+
+### Phase 12.1: Sub-agents — Isolated Agent Instances
+- [x] `internal/agent/subagent.go` — SubAgent struct, SubAgentOpts, SpawnSubAgent (synchronous), SubAgentManager (async + tracking + kill)
+- [x] Isolated context — sub-agent gets own Agent instance with fresh history, shared Runtime
+- [x] Optional parent context injection — selected messages passed without polluting parent
+- [x] Optional different LLM provider — sub-agents can use different providers than parent
+- [x] `spawn_subagent` tool — LLM-invocable tool for delegating subtasks, permission level: confirm
+- [x] `WithSubAgentProvider` agent option — configures the spawn_subagent tool's Execute function
+- [x] `SubAgentManager` — Track, SpawnAsync, Kill, List for session-level sub-agent management
+- [x] `/agent <task>` slash command — spawn sub-agent with `--provider` and `--name` flags
+- [x] `/agents` slash command — list all sub-agents in session with status/tokens/duration
+- [x] `/agents kill <name>` — stop a running sub-agent
+- [x] Permission: spawn_subagent = confirm in DefaultPermissions
+- [x] FormatToolPreview for spawn_subagent (shows name + task)
+- [x] System prompt updated with spawn_subagent tool
+- [x] `/help` updated with /agent, /agents, /agents kill
+- [x] 22 sub-agent tests (spawn happy path, tool calls, auto name, max iterations, missing args x4, isolated history, parent context, config, custom prompt, context cancellation, manager track/dedup/kill/kill-nonexistent/list-empty, tool not configured, tool via agent, tool empty task, tool in list, permissions)
+- [x] 7 new chat tests (agents list empty, agents with entries, agents kill no manager, agents kill nonexistent, agent missing task, help includes agent, commands never call provider)
+- [x] All 18 packages pass
+
 ---
 
 ## Completion Criteria
@@ -428,5 +449,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 11.4 | Three features: (1) /compact slash command — CompactHistory() agent method with LLM-based summarization, custom instructions, token reduction display, session update; (2) Extended thinking — ExtendedThinking/ThinkingBudget on ProviderEntry+Request+Response, all 6 providers updated (Anthropic thinking blocks, OpenAI/Responses reasoning_effort, Gemini thinkingConfig, Ollama silently ignored, Custom pass-through), /thinking toggle and /effort slash commands; (3) @ file references — resolveFileRefs() with regex pattern matching, file content injection in code blocks, directory listings, missing file warnings, wired into chat+ask. 30 new tests (9 compact + 8 thinking + 13 file refs). All 18 packages pass. | Done
 
 2026-03-15 | Phase 11.5 | Project memory, rules, skills, auto-memory, and ignore system: (1) OPENMARMUT.md project instruction loading with ancestor walking, global instructions, @ imports, content cap — 16 tests; (2) .openmarmut/rules/ glob-based rule system with dynamic activation — 22 tests; (3) .openmarmut/skills/ on-demand skill system with manual/auto triggers — 12 tests; (4) Auto-memory with per-project tagging, LLM-based extraction on session exit, /memory off|edit, config support — ~20 tests; (5) .openmarmutignore with .gitignore loading, default patterns, tool integration (grep/find/list_dir filtering), /ignore add|remove, pattern source tracking — ~25 tests. All 18 packages pass. | Done
+
+2026-03-15 | Phase 12.1 | Sub-agent system: SubAgent struct with isolated context, SpawnSubAgent (sync), SubAgentManager (async+track+kill), spawn_subagent LLM tool with WithSubAgentProvider, /agent slash command with --provider/--name flags, /agents list+kill commands, FormatToolPreview for spawn_subagent, 22 sub-agent tests + 7 chat tests. All 18 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->

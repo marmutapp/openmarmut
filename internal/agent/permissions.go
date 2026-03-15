@@ -68,6 +68,7 @@ func DefaultPermissions() map[string]PermissionLevel {
 		"git_commit":       PermConfirm,
 		"git_branch":       PermConfirm,
 		"git_checkout":     PermConfirm,
+		"spawn_subagent":   PermConfirm,
 	}
 }
 
@@ -248,6 +249,14 @@ func FormatToolPreview(tc llm.ToolCall) string {
 	case "git_checkout":
 		if br, ok := args["branch"]; ok {
 			fmt.Fprintf(&b, "(%v)", br)
+		}
+	case "spawn_subagent":
+		if name, ok := args["name"]; ok && name != "" {
+			fmt.Fprintf(&b, " (%v)", name)
+		}
+		if task, ok := args["task"].(string); ok {
+			t := truncatePreview(task, 120)
+			fmt.Fprintf(&b, "\n  task: %s", t)
 		}
 	default:
 		// Generic: show all args.

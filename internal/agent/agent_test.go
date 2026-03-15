@@ -648,7 +648,7 @@ func TestRun_ToolsIncludedInRequest(t *testing.T) {
 
 	require.Len(t, mp.requests, 1)
 	tools := mp.requests[0].Tools
-	assert.Len(t, tools, 17)
+	assert.Len(t, tools, 18)
 
 	toolNames := make(map[string]bool)
 	for _, t := range tools {
@@ -713,7 +713,7 @@ func TestToolsAccessor(t *testing.T) {
 	a := New(mp, rt, testLogger)
 
 	tools := a.Tools()
-	assert.Len(t, tools, 17)
+	assert.Len(t, tools, 18)
 }
 
 func TestToolCallCallback(t *testing.T) {
