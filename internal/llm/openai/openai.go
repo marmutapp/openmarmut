@@ -114,9 +114,20 @@ type streamOpts struct {
 
 type chatMessage struct {
 	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
+	Content    any            `json:"content,omitempty"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+// contentPart is used in OpenAI's multimodal content array.
+type contentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *imageURL `json:"image_url,omitempty"`
+}
+
+type imageURL struct {
+	URL string `json:"url"`
 }
 
 type chatTool struct {
@@ -177,10 +188,23 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			})
 
 		case llm.RoleUser:
-			cr.Messages = append(cr.Messages, chatMessage{
-				Role:    "user",
-				Content: msg.Content,
-			})
+			if len(msg.Images) > 0 {
+				parts := []contentPart{{Type: "text", Text: msg.Content}}
+				for _, img := range msg.Images {
+					parts = append(parts, contentPart{
+						Type: "image_url",
+						ImageURL: &imageURL{
+							URL: "data:" + img.MimeType + ";base64," + img.Data,
+						},
+					})
+				}
+				cr.Messages = append(cr.Messages, chatMessage{Role: "user", Content: parts})
+			} else {
+				cr.Messages = append(cr.Messages, chatMessage{
+					Role:    "user",
+					Content: msg.Content,
+				})
+			}
 
 		case llm.RoleAssistant:
 			cm := chatMessage{

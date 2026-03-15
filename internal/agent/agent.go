@@ -362,9 +362,15 @@ func New(provider llm.Provider, rt runtime.Runtime, logger *slog.Logger, opts ..
 // Run sends a user message and runs the agentic loop until the model
 // produces a final text response (no more tool calls).
 func (a *Agent) Run(ctx context.Context, userMessage string, stream llm.StreamCallback) (*Result, error) {
+	return a.RunWithImages(ctx, userMessage, nil, stream)
+}
+
+// RunWithImages sends a user message with optional attached images and runs the agentic loop.
+func (a *Agent) RunWithImages(ctx context.Context, userMessage string, images []llm.ImageContent, stream llm.StreamCallback) (*Result, error) {
 	a.history = append(a.history, llm.Message{
 		Role:    llm.RoleUser,
 		Content: userMessage,
+		Images:  images,
 	})
 
 	result := &Result{}

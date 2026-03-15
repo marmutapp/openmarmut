@@ -112,6 +112,7 @@ type chatOptions struct {
 type chatMessage struct {
 	Role      string         `json:"role"`
 	Content   string         `json:"content"`
+	Images    []string       `json:"images,omitempty"`
 	ToolCalls []chatToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -175,10 +176,11 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			})
 
 		case llm.RoleUser:
-			cr.Messages = append(cr.Messages, chatMessage{
-				Role:    "user",
-				Content: msg.Content,
-			})
+			cm := chatMessage{Role: "user", Content: msg.Content}
+			for _, img := range msg.Images {
+				cm.Images = append(cm.Images, img.Data)
+			}
+			cr.Messages = append(cr.Messages, cm)
 
 		case llm.RoleAssistant:
 			cm := chatMessage{

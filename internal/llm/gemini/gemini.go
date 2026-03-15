@@ -108,8 +108,14 @@ type content struct {
 
 type part struct {
 	Text             string            `json:"text,omitempty"`
+	InlineData       *inlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *functionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *functionResponse `json:"functionResponse,omitempty"`
+}
+
+type inlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type functionCall struct {
@@ -189,10 +195,13 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			}
 
 		case llm.RoleUser:
-			ar.Contents = append(ar.Contents, content{
-				Role:  "user",
-				Parts: []part{{Text: msg.Content}},
-			})
+			c := content{Role: "user", Parts: []part{{Text: msg.Content}}}
+			for _, img := range msg.Images {
+				c.Parts = append(c.Parts, part{
+					InlineData: &inlineData{MimeType: img.MimeType, Data: img.Data},
+				})
+			}
+			ar.Contents = append(ar.Contents, c)
 
 		case llm.RoleAssistant:
 			c := content{Role: "model"}

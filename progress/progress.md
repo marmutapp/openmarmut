@@ -474,6 +474,27 @@
 - [x] `internal/cli/chat_test.go` — 11 new tests (no hooks, list hooks, off/on/on-no-hooks, disabled warning, test invalid/success, no LLM call, help includes hooks)
 - [x] All 19 packages pass
 
+### Phase 13.2: Image Input for Vision-Capable Models
+- [x] `internal/llm/types.go` — `ImageContent` struct (Data, MimeType, Path), `Images` field on `Message`
+- [x] `internal/agent/images.go` — `LoadImage` (via Runtime), `LoadImageFromOS` (direct fs), `detectMIME` (magic bytes: PNG/JPEG/GIF/WebP), `IsImageExtension`, `MaxImageSize` (20MB)
+- [x] `internal/agent/agent.go` — `RunWithImages()` method, `Run()` delegates to it
+- [x] `internal/cli/filerefs.go` — `resolveFileRefs` now returns `[]llm.ImageContent` alongside text; image extensions detected and loaded via `agent.LoadImage` instead of inlined as text
+- [x] Provider image support in `buildRequest`:
+  - openai: `Content` changed to `any`, multimodal content array with `image_url` parts
+  - anthropic: `apiContentBlock.Source` + `imageSource`, content blocks with `type: "image"`
+  - gemini: `part.InlineData` + `inlineData` struct
+  - ollama: `chatMessage.Images []string` (base64 data)
+  - responses: `inputItem.Content` changed to `any`, `input_image` parts
+  - custom: map-based `image_url` parts (OpenAI-compatible)
+- [x] `internal/cli/chat.go` — `resolveFileRefs` returns images, `FormatImageAttachment` display, `ag.RunWithImages` call
+- [x] `internal/cli/ask.go` — `--image` flag (repeatable), images loaded via `agent.LoadImage`/`LoadImageFromOS` for no-tools mode, `ag.RunWithImages` call
+- [x] `internal/ui/styles.go` — `FormatImageAttachment` helper ("📎 path (size, mime)")
+- [x] `internal/agent/images_test.go` — 12 tests (MIME detection: PNG/JPEG/GIF/WebP/unknown/too-short, LoadImage: PNG/JPEG/not-found/unsupported/too-large, IsImageExtension)
+- [x] `internal/cli/filerefs_test.go` — 4 new image tests (single image, multiple images, mixed text+image, image not found) + updated existing 7 tests for 3-return-value signature
+- [x] `internal/llm/openai/openai_test.go` — 1 new test (image message wire format)
+- [x] `internal/llm/anthropic/anthropic_test.go` — 1 new test (image message wire format)
+- [x] All 19 packages pass
+
 ---
 
 ## Completion Criteria
@@ -539,5 +560,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Docs | Comprehensive test suite (docs/full-test-suite.md) covering all 14 feature areas across Phases 1–12: core runtime, LLM providers, agent loop, chat REPL, session persistence, project memory, plan mode, git integration, context management, sub-agents, MCP, advanced features, UI/UX, configuration. 90+ manual tests, 550+ unit tests referenced. All 19 packages pass, binary builds clean. | Done
 
 2026-03-15 | Phase 13.1 | Hooks system: internal/agent/hooks.go with shell (sh -c, stdin payload, env vars) and HTTP (POST JSON, abort response, custom headers with env interpolation) hook types. 6 events (pre/post tool, session, compact), tool filtering, on_error abort/continue. HookConfig in config.go, WithHooks agent option, pre/post hooks wired into agent Run loop and CompactHistory. /hooks slash command (list/on/off/test), pre/post session hooks in chat lifecycle, hooks status on startup. 22 agent tests + 11 chat tests. All 19 packages pass. | Done
+
+2026-03-15 | Phase 13.2 | Image input for vision-capable models: ImageContent type on Message, LoadImage/LoadImageFromOS with magic-byte MIME detection, @ file references detect image extensions and return them separately, all 6 providers updated with multimodal content formatting (OpenAI image_url, Anthropic image source, Gemini inlineData, Ollama images array, Responses input_image, Custom image_url), --image flag on ask command, FormatImageAttachment UI helper, RunWithImages agent method. 12 agent tests + 4 filerefs tests + 2 provider tests. All 19 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->

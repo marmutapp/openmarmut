@@ -1893,9 +1893,13 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				}
 
 				// Resolve @file references before sending to agent.
-				line, fileWarnings := resolveFileRefs(cmd.Context(), line, rt)
+				line, refImages, fileWarnings := resolveFileRefs(cmd.Context(), line, rt)
 				for _, w := range fileWarnings {
 					fmt.Fprintln(os.Stderr, ui.FormatWarning(w))
+				}
+				// Display loaded images.
+				for _, img := range refImages {
+					fmt.Fprintln(os.Stderr, ui.FormatImageAttachment(img.Path, img.MimeType, len(img.Data)*3/4))
 				}
 
 				// Prepend pending skill content if a skill was just invoked.
@@ -1931,7 +1935,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					return writeErr
 				}
 
-				result, err := ag.Run(cmd.Context(), line, streamCB)
+				result, err := ag.RunWithImages(cmd.Context(), line, refImages, streamCB)
 				// Ensure spinner is stopped on error or if no tokens were streamed.
 				if state.spinner != nil {
 					state.spinner.Stop()

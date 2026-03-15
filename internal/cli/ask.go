@@ -24,6 +24,7 @@ import (
 func newAskCmd(runner *Runner) *cobra.Command {
 	var noTools bool
 	var planFlag bool
+	var imageFlags []string
 
 	cmd := &cobra.Command{
 		Use:   "ask <question>",
@@ -66,9 +67,23 @@ func newAskCmd(runner *Runner) *cobra.Command {
 
 			if noTools {
 				// Simple single-turn, no agent loop.
+				// Load --image flags from OS (no Runtime in no-tools mode).
+				var cliImages []llm.ImageContent
+				for _, imgPath := range imageFlags {
+					img, imgErr := agent.LoadImageFromOS(imgPath)
+					if imgErr != nil {
+						spinner.Stop()
+						return fmt.Errorf("ask: %w", imgErr)
+					}
+					cliImages = append(cliImages, *img)
+				}
+				for _, img := range cliImages {
+					fmt.Fprintln(os.Stderr, ui.FormatImageAttachment(img.Path, img.MimeType, len(img.Data)*3/4))
+				}
+
 				req := llm.Request{
 					Messages: []llm.Message{
-						{Role: llm.RoleUser, Content: question},
+						{Role: llm.RoleUser, Content: question, Images: cliImages},
 					},
 					Temperature: cfg.LLM.DefaultTemperature,
 					MaxTokens:   cfg.LLM.DefaultMaxTokens,
@@ -155,9 +170,22 @@ func newAskCmd(runner *Runner) *cobra.Command {
 			ag := agent.New(provider, rt, log, opts...)
 
 			// Resolve @file references in the question.
-			question, fileWarnings := resolveFileRefs(cmd.Context(), question, rt)
+			question, refImages, fileWarnings := resolveFileRefs(cmd.Context(), question, rt)
 			for _, w := range fileWarnings {
 				fmt.Fprintln(os.Stderr, ui.FormatWarning(w))
+			}
+			// Load images from --image flags.
+			for _, imgPath := range imageFlags {
+				img, imgErr := agent.LoadImage(cmd.Context(), rt, imgPath)
+				if imgErr != nil {
+					spinner.Stop()
+					return fmt.Errorf("ask: %w", imgErr)
+				}
+				refImages = append(refImages, *img)
+			}
+			// Display loaded images.
+			for _, img := range refImages {
+				fmt.Fprintln(os.Stderr, ui.FormatImageAttachment(img.Path, img.MimeType, len(img.Data)*3/4))
 			}
 
 			if planFlag {
@@ -203,7 +231,7 @@ func newAskCmd(runner *Runner) *cobra.Command {
 				return nil
 			}
 
-			result, err := ag.Run(cmd.Context(), question, streamCB)
+			result, err := ag.RunWithImages(cmd.Context(), question, refImages, streamCB)
 			spinner.Stop()
 			if err != nil {
 				return fmt.Errorf("ask: %w", err)
@@ -228,6 +256,7 @@ func newAskCmd(runner *Runner) *cobra.Command {
 
 	cmd.Flags().BoolVar(&noTools, "no-tools", false, "disable tools (simple single-turn question)")
 	cmd.Flags().BoolVar(&planFlag, "plan", false, "plan first, then execute (analyze before acting)")
+	cmd.Flags().StringArrayVar(&imageFlags, "image", nil, "attach image file(s) to the question (can be repeated)")
 	return cmd
 }
 

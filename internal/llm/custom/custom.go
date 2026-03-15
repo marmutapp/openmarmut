@@ -161,10 +161,24 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			})
 
 		case llm.RoleUser:
-			messages = append(messages, map[string]any{
-				"role":    "user",
-				"content": msg.Content,
-			})
+			if len(msg.Images) > 0 {
+				var parts []map[string]any
+				parts = append(parts, map[string]any{"type": "text", "text": msg.Content})
+				for _, img := range msg.Images {
+					parts = append(parts, map[string]any{
+						"type": "image_url",
+						"image_url": map[string]any{
+							"url": "data:" + img.MimeType + ";base64," + img.Data,
+						},
+					})
+				}
+				messages = append(messages, map[string]any{"role": "user", "content": parts})
+			} else {
+				messages = append(messages, map[string]any{
+					"role":    "user",
+					"content": msg.Content,
+				})
+			}
 
 		case llm.RoleAssistant:
 			m := map[string]any{

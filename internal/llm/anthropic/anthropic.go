@@ -123,13 +123,20 @@ type apiMessage struct {
 }
 
 type apiContentBlock struct {
+	Type      string       `json:"type"`
+	Text      string       `json:"text,omitempty"`
+	ID        string       `json:"id,omitempty"`
+	Name      string       `json:"name,omitempty"`
+	Input     any          `json:"input,omitempty"`
+	ToolUseID string       `json:"tool_use_id,omitempty"`
+	Content   string       `json:"content,omitempty"`
+	Source    *imageSource `json:"source,omitempty"`
+}
+
+type imageSource struct {
 	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     any    `json:"input,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type apiToolDef struct {
@@ -181,10 +188,27 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			ar.System = msg.Content
 
 		case llm.RoleUser:
-			ar.Messages = append(ar.Messages, apiMessage{
-				Role:    "user",
-				Content: mustMarshal(msg.Content),
-			})
+			if len(msg.Images) > 0 {
+				var blocks []apiContentBlock
+				blocks = append(blocks, apiContentBlock{Type: "text", Text: msg.Content})
+				for _, img := range msg.Images {
+					blocks = append(blocks, apiContentBlock{
+						Type: "image",
+						Source: &imageSource{
+							Type:      "base64",
+							MediaType: img.MimeType,
+							Data:      img.Data,
+						},
+					})
+				}
+				raw, _ := json.Marshal(blocks)
+				ar.Messages = append(ar.Messages, apiMessage{Role: "user", Content: raw})
+			} else {
+				ar.Messages = append(ar.Messages, apiMessage{
+					Role:    "user",
+					Content: mustMarshal(msg.Content),
+				})
+			}
 
 		case llm.RoleAssistant:
 			if len(msg.ToolCalls) > 0 {

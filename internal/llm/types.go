@@ -47,9 +47,17 @@ type Response struct {
 // Message is a single message in the conversation.
 type Message struct {
 	Role       Role
-	Content    string     // Text content
-	ToolCalls  []ToolCall // Only for assistant messages that invoke tools
-	ToolCallID string     // Only for tool result messages — matches ToolCall.ID
+	Content    string         // Text content
+	Images     []ImageContent // Attached images (for vision-capable models)
+	ToolCalls  []ToolCall     // Only for assistant messages that invoke tools
+	ToolCallID string         // Only for tool result messages — matches ToolCall.ID
+}
+
+// ImageContent holds a base64-encoded image for multimodal messages.
+type ImageContent struct {
+	Data     string // Base64-encoded image data (no data URI prefix)
+	MimeType string // MIME type: image/png, image/jpeg, image/gif, image/webp
+	Path     string // Original file path (for display only)
 }
 
 // Role is the message sender.

@@ -473,3 +473,58 @@ func TestRegistration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "my-anthropic", p.Name())
 }
+
+func TestComplete_ImageMessage(t *testing.T) {
+	var capturedBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &capturedBody)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseLines(
+			`{"type":"message_start","message":{"id":"msg_img","model":"claude-sonnet-4-20250514","usage":{"input_tokens":50}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I see a cat"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		))
+	}))
+	defer srv.Close()
+
+	p := testProvider(t, srv.URL)
+	_, err := p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{
+			{
+				Role:    llm.RoleUser,
+				Content: "What's in this image?",
+				Images: []llm.ImageContent{
+					{Data: "aGVsbG8=", MimeType: "image/png", Path: "cat.png"},
+				},
+			},
+		},
+	}, nil)
+
+	require.NoError(t, err)
+
+	// Anthropic format: content is an array of blocks with text + image.
+	msgs := capturedBody["messages"].([]any)
+	require.Len(t, msgs, 1)
+	userMsg := msgs[0].(map[string]any)
+	assert.Equal(t, "user", userMsg["role"])
+
+	content := userMsg["content"].([]any)
+	require.Len(t, content, 2)
+
+	textBlock := content[0].(map[string]any)
+	assert.Equal(t, "text", textBlock["type"])
+	assert.Equal(t, "What's in this image?", textBlock["text"])
+
+	imgBlock := content[1].(map[string]any)
+	assert.Equal(t, "image", imgBlock["type"])
+	source := imgBlock["source"].(map[string]any)
+	assert.Equal(t, "base64", source["type"])
+	assert.Equal(t, "image/png", source["media_type"])
+	assert.Equal(t, "aGVsbG8=", source["data"])
+}

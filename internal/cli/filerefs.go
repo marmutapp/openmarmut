@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gajaai/openmarmut-go/internal/agent"
+	"github.com/gajaai/openmarmut-go/internal/llm"
 	"github.com/gajaai/openmarmut-go/internal/runtime"
 )
 
@@ -17,14 +19,17 @@ var fileRefPattern = regexp.MustCompile(`@([\w./_\-\\]+[\w./_\-\\]*)`)
 
 // resolveFileRefs finds @<path> patterns in the input and replaces them with
 // file contents (or directory listings) read from the runtime.
-// Returns the resolved string and any warnings for missing files.
-func resolveFileRefs(ctx context.Context, input string, rt runtime.Runtime) (string, []string) {
+// Image files (.png, .jpg, .jpeg, .gif, .webp) are loaded as ImageContent
+// and returned separately instead of being inlined as text.
+// Returns the resolved string, loaded images, and any warnings for missing files.
+func resolveFileRefs(ctx context.Context, input string, rt runtime.Runtime) (string, []llm.ImageContent, []string) {
 	matches := fileRefPattern.FindAllStringSubmatchIndex(input, -1)
 	if len(matches) == 0 {
-		return input, nil
+		return input, nil, nil
 	}
 
 	var warnings []string
+	var images []llm.ImageContent
 	var result strings.Builder
 	lastEnd := 0
 
@@ -46,11 +51,25 @@ func resolveFileRefs(ctx context.Context, input string, rt runtime.Runtime) (str
 		}
 		seen[pathStr] = true
 
+		// Check if this is an image file by extension.
+		ext := strings.ToLower(filepath.Ext(pathStr))
+		if agent.IsImageExtension(ext) {
+			img, err := agent.LoadImage(ctx, rt, pathStr)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("@%s: %s", pathStr, err.Error()))
+				result.WriteString("@" + pathStr)
+			} else {
+				images = append(images, *img)
+				// Replace the @ref with a note that the image is attached.
+				result.WriteString(fmt.Sprintf("[Image: %s]", pathStr))
+			}
+			continue
+		}
+
 		// Try reading as a file first.
 		data, err := rt.ReadFile(ctx, pathStr)
 		if err == nil {
 			// File found — inject contents in a code block.
-			ext := filepath.Ext(pathStr)
 			lang := lookupLang(ext)
 			result.WriteString(fmt.Sprintf("Contents of %s:\n```%s\n%s\n```", pathStr, lang, string(data)))
 			continue
@@ -78,7 +97,7 @@ func resolveFileRefs(ctx context.Context, input string, rt runtime.Runtime) (str
 	}
 
 	result.WriteString(input[lastEnd:])
-	return result.String(), warnings
+	return result.String(), images, warnings
 }
 
 // lookupLang returns the language identifier for a file extension,

@@ -131,12 +131,18 @@ type reasoningConfig struct {
 type inputItem struct {
 	Type      string `json:"type"`
 	Role      string `json:"role,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Content   any    `json:"content,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	Output    *string `json:"output,omitempty"` // pointer so nil omits, but empty string "" is preserved
 	ID        string `json:"id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+type inputContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type apiTool struct {
@@ -178,11 +184,22 @@ func (p *Provider) buildRequest(req llm.Request) ([]byte, error) {
 			ar.Instructions = msg.Content
 
 		case llm.RoleUser:
-			items = append(items, inputItem{
-				Type:    "message",
-				Role:    "user",
-				Content: msg.Content,
-			})
+			if len(msg.Images) > 0 {
+				parts := []inputContentPart{{Type: "input_text", Text: msg.Content}}
+				for _, img := range msg.Images {
+					parts = append(parts, inputContentPart{
+						Type:     "input_image",
+						ImageURL: "data:" + img.MimeType + ";base64," + img.Data,
+					})
+				}
+				items = append(items, inputItem{Type: "message", Role: "user", Content: parts})
+			} else {
+				items = append(items, inputItem{
+					Type:    "message",
+					Role:    "user",
+					Content: msg.Content,
+				})
+			}
 
 		case llm.RoleAssistant:
 			// Only emit a message item if there's actual text content.

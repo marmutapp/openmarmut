@@ -572,3 +572,51 @@ func TestMapStopReason(t *testing.T) {
 	assert.Equal(t, "max_tokens", mapStopReason("length"))
 	assert.Equal(t, "content_filter", mapStopReason("content_filter"))
 }
+
+func TestComplete_ImageMessage(t *testing.T) {
+	var capturedBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &capturedBody)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseData(
+			`{"id":"chatcmpl-8","choices":[{"index":0,"delta":{"content":"I see an image"},"finish_reason":"stop"}]}`,
+		))
+	}))
+	defer srv.Close()
+
+	p := testProvider(t, srv.URL)
+	_, err := p.Complete(context.Background(), llm.Request{
+		Messages: []llm.Message{
+			{
+				Role:    llm.RoleUser,
+				Content: "What's in this image?",
+				Images: []llm.ImageContent{
+					{Data: "aGVsbG8=", MimeType: "image/png", Path: "test.png"},
+				},
+			},
+		},
+	}, nil)
+
+	require.NoError(t, err)
+
+	// User message content should be an array with text and image_url parts.
+	msgs := capturedBody["messages"].([]any)
+	require.Len(t, msgs, 1)
+	userMsg := msgs[0].(map[string]any)
+	assert.Equal(t, "user", userMsg["role"])
+
+	content := userMsg["content"].([]any)
+	require.Len(t, content, 2)
+
+	textPart := content[0].(map[string]any)
+	assert.Equal(t, "text", textPart["type"])
+	assert.Equal(t, "What's in this image?", textPart["text"])
+
+	imgPart := content[1].(map[string]any)
+	assert.Equal(t, "image_url", imgPart["type"])
+	imgURL := imgPart["image_url"].(map[string]any)
+	assert.Equal(t, "data:image/png;base64,aGVsbG8=", imgURL["url"])
+}

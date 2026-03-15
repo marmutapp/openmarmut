@@ -403,6 +403,12 @@ func RenderProgressBar(pct, width int) string {
 	return styledBar + DimStyle.Render(label)
 }
 
+// FormatImageAttachment returns a dim styled image attachment indicator.
+func FormatImageAttachment(path, mimeType string, sizeBytes int) string {
+	size := HumanizeBytes(int64(sizeBytes))
+	return styled(DimStyle, fmt.Sprintf("  📎 %s (%s, %s)", path, size, mimeType))
+}
+
 // HumanizeBytes formats a byte count into a human-readable string.
 func HumanizeBytes(bytes int64) string {
 	const (
