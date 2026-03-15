@@ -188,15 +188,63 @@ func RenderTable(headers []string, rows [][]string, activeRow int) string {
 	return sb.String()
 }
 
+// BannerInfo holds optional fields displayed in the welcome banner.
+type BannerInfo struct {
+	Branch      string // current git branch
+	PRStatus    string // formatted PR status (e.g., "#142 — changes requested")
+	PRApproved  bool   // true if PR is approved (for green coloring)
+	PRChanges   bool   // true if changes requested (for yellow coloring)
+	SessionName string // session name if resumed
+	Instructions string // instructions file info (e.g., "OPENMARMUT.md (21 lines)")
+	RulesCount  int    // number of loaded rules
+	SkillsCount int    // number of available skills
+}
+
 // RenderWelcomeBanner renders the branded welcome box with session info.
-func RenderWelcomeBanner(providerName, model, targetDir, mode string) string {
+func RenderWelcomeBanner(providerName, model, targetDir, mode string, info *BannerInfo) string {
 	lines := []string{
 		FormatKeyValue("Provider", providerName+" ("+model+")"),
 		FormatKeyValue("Target", targetDir),
 		FormatKeyValue("Mode", mode),
-		"",
-		"Type /help for commands, /quit to exit",
 	}
+
+	if info != nil {
+		if info.Branch != "" {
+			lines = append(lines, FormatKeyValue("Branch", info.Branch))
+		}
+		if info.PRStatus != "" {
+			prText := info.PRStatus
+			if ColorEnabled() {
+				switch {
+				case info.PRApproved:
+					prText = SuccessStyle.Render(prText)
+				case info.PRChanges:
+					prText = WarningStyle.Render(prText)
+				default:
+					prText = DimStyle.Render(prText)
+				}
+			}
+			lines = append(lines, FormatKeyValue("PR", prText))
+		}
+		if info.SessionName != "" {
+			lines = append(lines, FormatKeyValue("Session", info.SessionName+" (resumed)"))
+		}
+		if info.Instructions != "" {
+			lines = append(lines, FormatKeyValue("Instructions", info.Instructions))
+		}
+		if info.RulesCount > 0 || info.SkillsCount > 0 {
+			var parts []string
+			if info.RulesCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d loaded", info.RulesCount))
+			}
+			if info.SkillsCount > 0 {
+				parts = append(parts, fmt.Sprintf("Skills: %d available", info.SkillsCount))
+			}
+			lines = append(lines, FormatKeyValue("Rules", strings.Join(parts, ", ")))
+		}
+	}
+
+	lines = append(lines, "", "Type /help for commands, /quit to exit")
 	content := strings.Join(lines, "\n")
 
 	if !ColorEnabled() {
@@ -217,6 +265,11 @@ func RenderWelcomeBanner(providerName, model, targetDir, mode string) string {
 		box = box[:idx] + "╭─" + title + strings.Repeat("─", 40) + box[idx+len(topBorder)+42:]
 	}
 	return box
+}
+
+// FormatPRStatus returns a formatted PR status line with appropriate coloring.
+func FormatPRStatus(number int, title, status string) string {
+	return fmt.Sprintf("#%d '%s' — %s", number, title, status)
 }
 
 // RenderConfirmBox renders a permission confirmation prompt inside a yellow-bordered box.

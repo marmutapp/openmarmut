@@ -515,6 +515,20 @@
 - [x] `internal/llm/anthropic/anthropic_test.go` — 1 new test (image message wire format)
 - [x] All 19 packages pass
 
+### Phase 13.4: PR Status, Key Bindings, and Final Polish
+- [x] `internal/agent/pr.go` — PRDetector (gh CLI), PRStatus struct, Detect/Checks/OpenInBrowser, FormatStatus, CurrentBranch
+- [x] `internal/cli/history.go` — inputHistory (Add/Previous/Next/Reset/Save/load), max 500 entries, dedup, file persistence
+- [x] `internal/cli/chat.go` — `/pr` slash command (/pr, /pr open, /pr checks), PR detector and history in chatState
+- [x] `internal/ui/styles.go` — BannerInfo struct, enhanced RenderWelcomeBanner with branch/PR/session/instructions/rules/skills
+- [x] Categorized `/help` with 7 groups: Session, Project, Git, Agent, Tools, Display, System
+- [x] Input history: Add on message send, Save on exit, loaded from ~/.config/openmarmut/history
+- [x] Welcome banner: branch, PR status (color-coded), instructions, rules count, skills count
+- [x] `internal/agent/pr_test.go` — 5 tests (FormatStatus: approved/changes/review/open/merged)
+- [x] `internal/cli/history_test.go` — 7 tests (add+navigate, skip duplicate, skip empty, max entries, save+load, reset, empty navigation)
+- [x] `internal/ui/styles_test.go` — 2 new tests (banner with full info, banner with partial info)
+- [x] `internal/cli/chat_test.go` — 5 new tests (help categorized, /pr not git, /pr handled, /pr open, /pr checks)
+- [x] All 19 packages pass
+
 ---
 
 ## Completion Criteria
@@ -584,5 +598,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 13.2 | Image input for vision-capable models: ImageContent type on Message, LoadImage/LoadImageFromOS with magic-byte MIME detection, @ file references detect image extensions and return them separately, all 6 providers updated with multimodal content formatting (OpenAI image_url, Anthropic image source, Gemini inlineData, Ollama images array, Responses input_image, Custom image_url), --image flag on ask command, FormatImageAttachment UI helper, RunWithImages agent method. 12 agent tests + 4 filerefs tests + 2 provider tests. All 19 packages pass. | Done
 
 2026-03-15 | Phase 13.3 | Agent teams with parallel execution: FileLock (per-path mutex with timeout), Team struct with 3-phase orchestration (plan→execute→integrate), lockedRuntime for write safety, TeamManager for async execution, multi-provider support (lead/worker can differ), TeamConfig in config.yaml, /team slash command (task/status/cancel/history), parsePlanTasks, FormatTeamResult/Snapshot. 7 filelock tests + 16 team tests. All 19 packages pass. | Done
+
+2026-03-15 | Phase 13.4 | PR status display, key bindings, and final polish: PRDetector with gh CLI integration (detect/checks/open), inputHistory with file persistence and navigation, enhanced welcome banner with BannerInfo (branch, PR status color-coded, session, instructions, rules/skills counts), categorized /help with 7 groups, /pr slash command (/pr, /pr open, /pr checks), CurrentBranch helper. 5 PR tests + 7 history tests + 2 banner tests + 5 chat tests. All 19 packages pass. Phase 13 complete. | Done
 
 <!-- Claude: append a new line here after each working session -->

@@ -66,6 +66,9 @@ type chatState struct {
 	bgNextID         int              // next background job ID.
 	hooks            []agent.Hook     // configured hooks.
 	teamMgr          *agent.TeamManager // team execution manager.
+	prDetector       *agent.PRDetector  // PR status detector.
+	prStatus         *agent.PRStatus    // cached PR status.
+	inputHistory     *inputHistory      // message history for up/down recall.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -196,6 +199,11 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return handlePlan(line, state)
 	}
 
+	if strings.HasPrefix(line, "/pr") {
+		handlePR(line, state)
+		return slashHandled
+	}
+
 	switch line {
 	case "/commands":
 		renderCustomCommands(state)
@@ -239,64 +247,83 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 	}
 }
 
-// renderHelpBox displays available commands in a styled box.
+// renderHelpBox displays available commands in categorized groups.
 func renderHelpBox(w io.Writer) {
-	commands := [][]string{
-		{"/clear", "Reset conversation history"},
-		{"/tools", "List available tools"},
-		{"/cost", "Show accumulated session cost"},
-		{"/context", "Show context window usage"},
-		{"/diff [file]", "Show uncommitted changes"},
-		{"/commit [msg]", "Commit changes (generates message if omitted)"},
-		{"/rewind [n]", "Undo last N turns of file changes"},
-		{"/rewind --list", "Show checkpoint history"},
-		{"/compact [instr]", "Compact history (optional custom instruction)"},
-		{"/thinking", "Toggle extended thinking on/off"},
-		{"/effort <level>", "Set thinking effort (low/medium/high)"},
-		{"/plan [msg]", "Toggle plan mode or plan one-shot"},
-		{"/rules", "Show loaded rules and active status"},
-		{"/skill [name]", "List skills or invoke one"},
-		{"/memory", "Show stored memories"},
-		{"/memory add <text>", "Save a memory manually"},
-		{"/memory clear", "Clear all memories"},
-		{"/memory off", "Disable auto-memory for this session"},
-		{"/memory edit", "Open MEMORY.md in $EDITOR"},
-		{"/ignore", "Show current ignore patterns"},
-		{"/ignore add <pat>", "Add pattern to .openmarmutignore"},
-		{"/ignore remove <pat>", "Remove pattern from .openmarmutignore"},
-		{"/agent <task>", "Spawn a sub-agent for a task"},
-		{"/agents", "List sub-agents in this session"},
-		{"/agents kill <name>", "Stop a running sub-agent"},
-		{"/mcp", "Show connected MCP servers and tools"},
-		{"/btw <question>", "Quick side question (isolated context)"},
-		{"/loop <int> <cmd>", "Run command on interval (e.g., /loop 5m go test)"},
-		{"/loop status", "Show active loops"},
-		{"/loop off", "Stop all loops"},
-		{"/tasks", "Show tracked tasks"},
-		{"/tasks add <title>", "Add a new task"},
-		{"/tasks done <id>", "Mark task as completed"},
-		{"/tasks clear", "Remove completed tasks"},
-		{"/team <task>", "Run task with parallel agent team"},
-		{"/team status", "Show current team execution"},
-		{"/team cancel", "Cancel all running teams"},
-		{"/team history", "Show past team executions"},
-		{"/bg <task>", "Run task in background sub-agent"},
-		{"/bg status", "Show background jobs"},
-		{"/bg cancel <id>", "Cancel a background job"},
-		{"/model", "Show current model"},
-		{"/model <name>", "Switch model for this session"},
-		{"/provider <name>", "Switch provider for this session"},
-		{"/hooks", "List configured hooks"},
-		{"/hooks on|off", "Enable/disable hooks for this session"},
-		{"/hooks test <n>", "Test-fire a hook by index"},
-		{"/commands", "List custom commands from .openmarmut/commands/"},
-		{"/sessions", "List recent sessions"},
-		{"/rename <name>", "Rename current session"},
-		{"/help", "Show this help"},
-		{"/quit", "Exit chat"},
+	type group struct {
+		name     string
+		commands [][]string
 	}
-	headers := []string{"COMMAND", "DESCRIPTION"}
-	fmt.Fprintln(w, ui.RenderBox("Commands", ui.RenderTable(headers, commands, -1)))
+
+	groups := []group{
+		{"Session", [][]string{
+			{"/clear", "Reset conversation history"},
+			{"/compact [instr]", "Compact history"},
+			{"/rename <name>", "Rename current session"},
+			{"/sessions", "List recent sessions"},
+		}},
+		{"Project", [][]string{
+			{"/rules", "Show loaded rules"},
+			{"/skill [name]", "List skills or invoke one"},
+			{"/memory", "Show stored memories"},
+			{"/ignore", "Show ignore patterns"},
+			{"/commands", "List custom commands"},
+		}},
+		{"Git", [][]string{
+			{"/diff [file]", "Show uncommitted changes"},
+			{"/commit [msg]", "Commit changes"},
+			{"/rewind [n]", "Undo last N turns of file changes"},
+			{"/pr", "Show PR status"},
+		}},
+		{"Agent", [][]string{
+			{"/plan [msg]", "Toggle plan mode"},
+			{"/agent <task>", "Spawn a sub-agent"},
+			{"/agents", "List sub-agents"},
+			{"/bg <task>", "Run in background"},
+			{"/team <task>", "Parallel agent team"},
+			{"/btw <question>", "Quick side question"},
+		}},
+		{"Tools", [][]string{
+			{"/tools", "List available tools"},
+			{"/hooks", "List configured hooks"},
+			{"/mcp", "Show MCP servers"},
+			{"/loop <int> <cmd>", "Run command on interval"},
+		}},
+		{"Display", [][]string{
+			{"/cost", "Show session cost"},
+			{"/context", "Show context usage"},
+			{"/model [name]", "Show/switch model"},
+			{"/thinking", "Toggle extended thinking"},
+			{"/effort <level>", "Set thinking effort"},
+			{"/tasks", "Show tracked tasks"},
+		}},
+		{"System", [][]string{
+			{"/help", "Show this help"},
+			{"/quit", "Exit chat"},
+		}},
+	}
+
+	var sb strings.Builder
+	for i, g := range groups {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		// Category header with commands as a compact table.
+		header := g.name + ":"
+		if ui.ColorEnabled() {
+			header = ui.BrandStyle.Render(g.name + ":")
+		}
+		sb.WriteString(header + "\n")
+		for _, cmd := range g.commands {
+			cmdName := cmd[0]
+			desc := cmd[1]
+			if ui.ColorEnabled() {
+				cmdName = ui.WarningStyle.Render(cmdName)
+			}
+			sb.WriteString(fmt.Sprintf("  %-26s  %s\n", cmdName, desc))
+		}
+	}
+
+	fmt.Fprintln(w, ui.RenderBox("Commands", sb.String()))
 }
 
 // renderMemory displays stored auto-memory entries.
@@ -1875,6 +1902,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			state.customCommands = customCmds
 			state.taskList = taskList
 			state.hooks = hooks
+			state.inputHistory = newInputHistory()
 			if mcpMgr != nil {
 				defer mcpMgr.CloseAll()
 			}
@@ -1942,22 +1970,34 @@ func newChatCmd(runner *Runner) *cobra.Command {
 				// Initial save to create the file.
 				go session.Save(sess) //nolint:errcheck
 
-				// Welcome banner.
+				// Build enhanced welcome banner info.
+				bannerInfo := &ui.BannerInfo{}
+				if state.isGitRepo {
+					bannerInfo.Branch = agent.CurrentBranch(cmd.Context(), rt)
+					// Detect PR status (non-blocking: detect inline for banner).
+					state.prDetector = agent.NewPRDetector(rt)
+					if pr := state.prDetector.Detect(cmd.Context()); pr != nil {
+						state.prStatus = pr
+						bannerInfo.PRStatus = pr.FormatStatus()
+						bannerInfo.PRApproved = pr.ReviewDecision == "APPROVED"
+						bannerInfo.PRChanges = pr.ReviewDecision == "CHANGES_REQUESTED"
+					}
+				}
+				if projInfo != nil && projInfo.Content != "" {
+					instrMsg := fmt.Sprintf("%s (%d lines)", projInfo.Source, projInfo.Lines)
+					if projInfo.Truncated {
+						instrMsg += " [truncated]"
+					}
+					bannerInfo.Instructions = instrMsg
+				}
+				// Count rules and skills.
+				bannerInfo.RulesCount = len(ag.Rules())
+				bannerInfo.SkillsCount = len(ag.Skills())
+
 				fmt.Fprintln(os.Stderr, ui.RenderWelcomeBanner(
 					provider.Name(), provider.Model(),
-					cfg.TargetDir, cfg.Mode,
+					cfg.TargetDir, cfg.Mode, bannerInfo,
 				))
-
-				// Display project instructions status.
-				if projInfo != nil && projInfo.Content != "" {
-					msg := fmt.Sprintf("Instructions: %s (%d lines)", projInfo.Source, projInfo.Lines)
-					if projInfo.Truncated {
-						msg += " [truncated]"
-					}
-					fmt.Fprintln(os.Stderr, ui.FormatHint(msg))
-				} else {
-					fmt.Fprintln(os.Stderr, ui.FormatHint("No OPENMARMUT.md found"))
-				}
 
 				// Display MCP server status.
 				if mcpMgr != nil {
@@ -2017,6 +2057,11 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					continue
 				}
 
+				// Record in input history.
+				if state.inputHistory != nil {
+					state.inputHistory.Add(line)
+				}
+
 				// Handle slash commands locally — no LLM call.
 				action := handleSlashCommand(line, state)
 				switch action {
@@ -2024,6 +2069,10 @@ func newChatCmd(runner *Runner) *cobra.Command {
 					// Stop background loops.
 					if state.loopMgr != nil {
 						state.loopMgr.StopAll()
+					}
+					// Save input history.
+					if state.inputHistory != nil {
+						_ = state.inputHistory.Save()
 					}
 					// Run post_session hooks.
 					runPostSessionHooks(cmd.Context(), state, log)
@@ -2530,6 +2579,55 @@ func handleCommit(line string, state *chatState) {
 		return
 	}
 	fmt.Fprintln(state.out, ui.FormatSuccess("Committed: "+strings.TrimRight(commitResult.Stdout, "\n")))
+}
+
+// handlePR handles /pr, /pr open, /pr checks commands.
+func handlePR(line string, state *chatState) {
+	if !state.isGitRepo {
+		fmt.Fprintln(state.out, ui.FormatWarning("Not a git repository."))
+		return
+	}
+	if state.prDetector == nil {
+		state.prDetector = agent.NewPRDetector(state.rt)
+	}
+
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/pr"))
+
+	switch arg {
+	case "open":
+		if err := state.prDetector.OpenInBrowser(context.Background()); err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to open PR: "+err.Error()))
+		} else {
+			fmt.Fprintln(state.out, ui.FormatSuccess("Opened PR in browser."))
+		}
+	case "checks":
+		checks, err := state.prDetector.Checks(context.Background())
+		if err != nil {
+			fmt.Fprintln(state.out, ui.FormatError("Failed to get PR checks: "+err.Error()))
+		} else {
+			fmt.Fprintln(state.out, checks)
+		}
+	default:
+		// Refresh and show status.
+		pr := state.prDetector.Detect(context.Background())
+		state.prStatus = pr
+		if pr == nil {
+			fmt.Fprintln(state.out, ui.FormatHint("No PR found for current branch."))
+		} else {
+			status := pr.FormatStatus()
+			if ui.ColorEnabled() {
+				switch pr.ReviewDecision {
+				case "APPROVED":
+					status = ui.SuccessStyle.Render(status)
+				case "CHANGES_REQUESTED":
+					status = ui.WarningStyle.Render(status)
+				default:
+					status = ui.DimStyle.Render(status)
+				}
+			}
+			fmt.Fprintln(state.out, ui.FormatKeyValue("PR", status))
+		}
+	}
 }
 
 // isGitRepo checks if the runtime target directory is a git repository.

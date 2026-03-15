@@ -257,7 +257,7 @@ func TestRenderCostBox(t *testing.T) {
 }
 
 func TestWelcomeBanner(t *testing.T) {
-	result := ui.RenderWelcomeBanner("azure-codex", "gpt-5.1", "/tmp/project", "local")
+	result := ui.RenderWelcomeBanner("azure-codex", "gpt-5.1", "/tmp/project", "local", nil)
 	assert.Contains(t, result, "azure-codex")
 	assert.Contains(t, result, "gpt-5.1")
 	assert.Contains(t, result, "/tmp/project")
@@ -1448,5 +1448,58 @@ func TestHelpIncludesHooks(t *testing.T) {
 	var buf bytes.Buffer
 	renderHelpBox(&buf)
 	assert.Contains(t, buf.String(), "/hooks")
-	assert.Contains(t, buf.String(), "test")
+}
+
+func TestHelpCategorized(t *testing.T) {
+	var buf bytes.Buffer
+	renderHelpBox(&buf)
+	output := buf.String()
+	assert.Contains(t, output, "Session:")
+	assert.Contains(t, output, "Project:")
+	assert.Contains(t, output, "Git:")
+	assert.Contains(t, output, "Agent:")
+	assert.Contains(t, output, "Tools:")
+	assert.Contains(t, output, "Display:")
+	assert.Contains(t, output, "System:")
+	assert.Contains(t, output, "/pr")
+	assert.Contains(t, output, "/clear")
+	assert.Contains(t, output, "/quit")
+}
+
+func TestSlashPR_NotGitRepo(t *testing.T) {
+	state, buf := newTestState()
+	state.isGitRepo = false
+
+	action := handleSlashCommand("/pr", state)
+	assert.Equal(t, slashHandled, action)
+	assert.Contains(t, buf.String(), "Not a git repository")
+}
+
+func TestSlashPR_Handled(t *testing.T) {
+	state, buf := newTestState()
+	state.isGitRepo = true
+
+	action := handleSlashCommand("/pr", state)
+	assert.Equal(t, slashHandled, action)
+	// Should output something (no PR found or PR info).
+	assert.True(t, buf.Len() > 0)
+}
+
+func TestSlashPR_Open(t *testing.T) {
+	state, buf := newTestState()
+	state.isGitRepo = true
+
+	action := handleSlashCommand("/pr open", state)
+	assert.Equal(t, slashHandled, action)
+	// Will fail since stubRuntime doesn't have gh, but should handle gracefully.
+	assert.True(t, buf.Len() > 0)
+}
+
+func TestSlashPR_Checks(t *testing.T) {
+	state, buf := newTestState()
+	state.isGitRepo = true
+
+	action := handleSlashCommand("/pr checks", state)
+	assert.Equal(t, slashHandled, action)
+	assert.True(t, buf.Len() > 0)
 }

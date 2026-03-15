@@ -187,7 +187,7 @@ func TestRenderWelcomeBanner_NoColor(t *testing.T) {
 	overrideTTY(false)
 	defer overrideTTY(false)
 
-	result := RenderWelcomeBanner("azure-codex", "gpt-5.1", "/tmp/project", "local")
+	result := RenderWelcomeBanner("azure-codex", "gpt-5.1", "/tmp/project", "local", nil)
 	assert.Contains(t, result, "OpenMarmut")
 	assert.Contains(t, result, "azure-codex")
 	assert.Contains(t, result, "gpt-5.1")
@@ -200,11 +200,46 @@ func TestRenderWelcomeBanner_WithColor(t *testing.T) {
 	overrideTTY(true)
 	defer overrideTTY(false)
 
-	result := RenderWelcomeBanner("claude", "opus", "/home/user", "docker")
+	result := RenderWelcomeBanner("claude", "opus", "/home/user", "docker", nil)
 	assert.Contains(t, result, "claude")
 	assert.Contains(t, result, "opus")
 	assert.Contains(t, result, "/home/user")
 	assert.Contains(t, result, "docker")
+}
+
+func TestRenderWelcomeBanner_WithBannerInfo(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	info := &BannerInfo{
+		Branch:       "feature/auth",
+		PRStatus:     "#42 'Add auth' — approved",
+		PRApproved:   true,
+		SessionName:  "auth-work",
+		Instructions: "OPENMARMUT.md (21 lines)",
+		RulesCount:   3,
+		SkillsCount:  2,
+	}
+	result := RenderWelcomeBanner("azure-codex", "gpt-5.1", "/tmp/project", "local", info)
+	assert.Contains(t, result, "feature/auth")
+	assert.Contains(t, result, "#42 'Add auth' — approved")
+	assert.Contains(t, result, "auth-work (resumed)")
+	assert.Contains(t, result, "OPENMARMUT.md (21 lines)")
+	assert.Contains(t, result, "3 loaded")
+	assert.Contains(t, result, "Skills: 2 available")
+}
+
+func TestRenderWelcomeBanner_WithPartialInfo(t *testing.T) {
+	overrideTTY(false)
+	defer overrideTTY(false)
+
+	info := &BannerInfo{
+		Branch: "main",
+	}
+	result := RenderWelcomeBanner("ollama", "llama3", "/home/user/project", "local", info)
+	assert.Contains(t, result, "main")
+	assert.NotContains(t, result, "PR:")
+	assert.NotContains(t, result, "Session:")
 }
 
 func TestRenderConfirmBox_NoColor(t *testing.T) {
