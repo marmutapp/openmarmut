@@ -198,7 +198,7 @@
 - [x] New style helpers: FormatHint, FormatProviderType, FormatPermission, FormatDirEntry, RenderCodeBlock, TruncateEnd
 - [x] All 17 packages pass
 
-### Phase 10.5: Context Window Visibility & Robustness
+### Phase 10.5: Context Window Visibility & Robustness (complete)
 - [x] Verified existing context management: token estimation, 80% threshold truncation, system prompt + last N turns preserved
 - [x] `ContextConfig.KeepRecentTurns` — configurable (was hardcoded `minKeepTurns=4`), falls back to default if 0
 - [x] `ComputeContextUsage` — returns ContextUsageInfo (tokens, window, percent, threshold, turns, system tokens)
@@ -214,6 +214,85 @@
 - [x] Config precedence: provider default → agent config override
 - [x] `/help` updated with `/context`
 - [x] 17 new tests (context_test.go + styles_test.go + chat_test.go), all 17 packages pass
+
+## Phase 11: Session Persistence
+
+### Phase 11.1: Save & Resume Conversations
+- [x] `internal/session/session.go` — Session struct, SessionSummary, NewID, UserTurns, DisplayName
+- [x] `internal/session/manager.go` — Save (atomic), Load, Delete, List, FindRecent, FindByTarget, Cleanup
+- [x] `internal/session/session_test.go` — 15 tests (save/load/delete/list/find/cleanup/traversal)
+- [x] `internal/agent/agent.go` — SetHistory method for session resume
+- [x] `internal/config/config.go` — AgentConfig.SessionRetentionDays field
+- [x] `internal/cli/chat.go` — session wiring: auto-save after each turn, resume banner, provider/mode change warnings
+- [x] `internal/cli/chat.go` — `--continue` flag (resume most recent session for target dir)
+- [x] `internal/cli/chat.go` — `--resume <id>` flag (resume specific session by ID)
+- [x] `internal/cli/chat.go` — `--name` flag (name the session at start)
+- [x] `internal/cli/chat.go` — `/rename <name>` slash command, `/sessions` slash command
+- [x] `internal/cli/chat.go` — session cleanup on startup (configurable retention days)
+- [x] `internal/cli/sessions.go` — `openmarmut sessions` list command with `--target` filter
+- [x] `internal/cli/sessions.go` — `openmarmut sessions delete <id>` subcommand
+- [x] `internal/cli/root.go` — sessions command registered
+- [x] Docker context metadata stored (image, mount, network)
+- [x] All 18 packages pass
+
+### Phase 11.2: Git Integration & File Checkpointing
+- [x] `internal/agent/tools.go` — 7 git tools: git_status, git_diff, git_diff_staged, git_log, git_commit, git_branch, git_checkout
+- [x] All git tools use Runtime.Exec so they work in both local and Docker mode
+- [x] `internal/agent/permissions.go` — git_status/diff/diff_staged/log = auto, git_commit/branch/checkout = confirm
+- [x] `internal/agent/agent.go` — updated system prompt with all 17 tools, git usage rules
+- [x] `internal/agent/checkpoint.go` — CheckpointStore, FileSnapshot, StartTurn, CaptureFile, Rewind, HasChanges, LastN
+- [x] `internal/agent/agent.go` — WithCheckpointStore option, captureCheckpoint before write_file/patch_file/delete_file
+- [x] `internal/agent/permissions.go` — FormatToolPreview for git_commit/git_branch/git_checkout
+- [x] `internal/cli/chat.go` — `/rewind [n]` and `/rewind --list` slash commands
+- [x] `internal/cli/chat.go` — `/diff [file]` slash command (runs git diff via Runtime)
+- [x] `internal/cli/chat.go` — `/commit [msg]` slash command (stages, commits with confirmation)
+- [x] `internal/cli/chat.go` — dirty state warning on chat start if git repo has uncommitted changes
+- [x] `internal/cli/chat.go` — auto-commit suggestion hint after agent modifies files
+- [x] `internal/cli/chat.go` — formatToolArgs for git tools, isGitRepo/warnDirtyState/hasFileChanges helpers
+- [x] `internal/cli/chat.go` — `/help` updated with /diff, /commit, /rewind
+- [x] `internal/agent/checkpoint_test.go` — 16 tests (start turn, capture existing/new, no duplicates, max checkpoints, rewind restore/delete/multi/zero/overflow, has changes, last N, set checkpoints, agent integration x2)
+- [x] `internal/agent/git_tools_test.go` — 18 tests (all 7 tools: happy path, error cases, edge cases, tool list, permissions)
+- [x] `internal/cli/chat_test.go` — 8 new tests (rewind/diff/commit slash commands, help includes git, hasFileChanges, formatToolArgs git, shellQuoteCLI)
+- [x] All 18 packages pass
+
+### Phase 11.3: Plan Mode — Analyze Before Acting
+- [x] `internal/agent/agent.go` — `planSystemPrompt` constant with read-only tool restrictions
+- [x] `internal/agent/agent.go` — `readOnlyTools` map (9 tools: read_file, read_file_lines, list_dir, grep_files, find_files, git_status, git_diff, git_diff_staged, git_log)
+- [x] `internal/agent/agent.go` — `RunPlan()` method: uses plan system prompt, read-only tools only, doesn't pollute main history
+- [x] `internal/agent/agent.go` — `ReadOnlyToolNames()` exported accessor
+- [x] `internal/config/config.go` — `AgentConfig.PlanProvider` field for multi-provider plan mode
+- [x] `internal/ui/styles.go` — `PlanBoxStyle` (blue-bordered), `RenderPlanBox()`, `RenderPlanApproval()` helpers
+- [x] `internal/cli/chat.go` — `planMode bool` in chatState
+- [x] `internal/cli/chat.go` — `/plan` slash command: toggle (`/plan`, `/plan on`, `/plan off`) and one-shot (`/plan <message>`)
+- [x] `internal/cli/chat.go` — `handlePlan()` and `executePlanFlow()` functions
+- [x] `internal/cli/chat.go` — plan flow: analysis → styled plan display → approval (y/n/e) → execution
+- [x] `internal/cli/chat.go` — plan mode routing in main chat loop (when toggled on, all messages go through plan flow)
+- [x] `internal/cli/chat.go` — `/help` updated with `/plan` entry
+- [x] `internal/cli/ask.go` — `--plan` flag for plan-then-execute in non-interactive mode
+- [x] `internal/agent/agent_test.go` — 8 new plan mode tests (RunPlan text only, read-only tools, blocks write tools, doesn't pollute history, plan system prompt, only read-only tool defs, ReadOnlyToolNames)
+- [x] `internal/cli/chat_test.go` — 5 new tests (/plan toggle, on/off, never calls provider, help includes plan, command list includes plan)
+- [x] `internal/ui/styles_test.go` — 4 new tests (RenderPlanBox color on/off, RenderPlanApproval color on/off)
+- [x] All 18 packages pass
+
+### Phase 11.4: Compaction, Extended Thinking, @ File References
+- [x] `internal/agent/agent.go` — `CompactHistory()` method: LLM-based summarization with custom instructions, preserves system prompt, returns before/after token counts
+- [x] `internal/cli/chat.go` — `/compact [instruction]` slash command with token reduction display, session update
+- [x] `internal/llm/types.go` — `ExtendedThinking`/`ThinkingBudget` on Request, `Thinking`/`ThinkingTokens` on Response, `ExtendedThinking`/`ThinkingBudget` on ProviderEntry
+- [x] `internal/llm/anthropic/anthropic.go` — `thinkingConfig` block, `thinking_delta` SSE parsing, temperature cleared when thinking enabled
+- [x] `internal/llm/openai/openai.go` — `reasoning_effort` field with `budgetToEffort` mapping
+- [x] `internal/llm/responses/responses.go` — `reasoning` config with effort level
+- [x] `internal/llm/gemini/gemini.go` — `thinkingConfig` in `generationConfig`
+- [x] `internal/llm/ollama/ollama.go` — silently ignores extended thinking
+- [x] `internal/llm/custom/custom.go` — pass-through `extended_thinking`/`thinking_budget` fields
+- [x] `internal/agent/agent.go` — `WithExtendedThinking` option, `SetExtendedThinking`/`SetThinkingBudget` runtime methods
+- [x] `internal/cli/chat.go` — `/thinking` toggle, `/effort low|medium|high` slash commands
+- [x] `internal/cli/filerefs.go` — `resolveFileRefs()`: regex pattern matching for `@path`, file content injection in code blocks, directory listings, missing file warnings
+- [x] `internal/cli/chat.go` — @ file references resolved before sending to agent
+- [x] `internal/cli/ask.go` — @ file references resolved in agent path
+- [x] `internal/agent/agent_test.go` — 8 new tests (5 compact + 3 thinking)
+- [x] `internal/cli/chat_test.go` — 9 new tests (3 compact + 6 thinking/effort)
+- [x] `internal/cli/filerefs_test.go` — 13 new tests (file resolution, directory, missing, duplicate, pattern matching, lookupLang)
+- [x] All 18 packages pass
 
 ---
 
@@ -258,5 +337,13 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 10.3 | Chat REPL styled UI: welcome banner, UserPromptStyle, FormatToolCall, ConfirmBox permission prompts, FormatSummary, spinner, styled /help+/tools+/cost+/clear. New helpers: RenderWelcomeBanner, RenderConfirmBox, RenderMarkdown. 25 new tests. All 17 packages pass. | Phase 10.4: remaining CLI commands
 2026-03-15 | Phase 10.4 | All CLI commands styled: ask (spinner+summary), providers (color-coded table), ls (permissions+HumanizeBytes), info (RenderBox), read (syntax highlighting), errors.go (hints). Phase 10 complete. | Done
 2026-03-15 | Phase 10.5 | Context window visibility: /context command, ctx% in summary, truncation notifications, 60% proactive warning, color-coded progress bar, configurable KeepRecentTurns/TruncationThreshold, TruncateLargeToolResult for oversized outputs, AgentConfig context fields. 17 new tests. | Done
+
+2026-03-15 | Phase 11.1 | Session persistence: internal/session package (Session struct, Save/Load/Delete/List/FindRecent/FindByTarget/Cleanup), agent SetHistory, chat wiring (auto-save, --continue/--resume/--name flags, /rename+/sessions commands, resume banner, provider/mode warnings, cleanup on startup), sessions CLI command with delete subcommand. 15 session tests, all 18 packages pass. | Done
+
+2026-03-15 | Phase 11.2 | Git integration & checkpointing: 7 git tools (status/diff/diff_staged/log/commit/branch/checkout) via Runtime.Exec, CheckpointStore for file change tracking with rewind support, /rewind+/diff+/commit slash commands, dirty state warning, auto-commit suggestion. 42 new tests (16 checkpoint + 18 git tools + 8 CLI). All 18 packages pass. | Done
+
+2026-03-15 | Phase 11.3 | Plan mode: RunPlan() method with read-only tools and plan system prompt, /plan slash command (toggle + one-shot), plan→approve→execute flow with styled plan box, --plan flag for ask command. 17 new tests (8 agent + 5 CLI + 4 UI). All 18 packages pass. | Done
+
+2026-03-15 | Phase 11.4 | Three features: (1) /compact slash command — CompactHistory() agent method with LLM-based summarization, custom instructions, token reduction display, session update; (2) Extended thinking — ExtendedThinking/ThinkingBudget on ProviderEntry+Request+Response, all 6 providers updated (Anthropic thinking blocks, OpenAI/Responses reasoning_effort, Gemini thinkingConfig, Ollama silently ignored, Custom pass-through), /thinking toggle and /effort slash commands; (3) @ file references — resolveFileRefs() with regex pattern matching, file content injection in code blocks, directory listings, missing file warnings, wired into chat+ask. 30 new tests (9 compact + 8 thinking + 13 file refs). All 18 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->
