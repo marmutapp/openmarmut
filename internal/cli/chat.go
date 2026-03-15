@@ -2356,50 +2356,6 @@ func renderResumeBanner(sess *session.Session, w io.Writer) {
 	fmt.Fprintln(w, ui.RenderBox("Resuming Session", content))
 }
 
-// showSessionPicker displays an interactive list of recent sessions.
-// Returns the selected session ID or empty string if cancelled.
-func showSessionPicker(scanner *bufio.Scanner, w io.Writer) string {
-	summaries, err := session.FindRecent(10)
-	if err != nil || len(summaries) == 0 {
-		fmt.Fprintln(w, ui.FormatHint("No sessions found."))
-		return ""
-	}
-
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, ui.HeaderStyle.Render("Recent Sessions:"))
-
-	headers := []string{"#", "NAME", "AGE", "PROVIDER", "TARGET", "TURNS"}
-	var rows [][]string
-	for i, s := range summaries {
-		rows = append(rows, []string{
-			fmt.Sprintf("%d", i+1),
-			displayName(s.Name),
-			humanizeAge(s.UpdatedAt),
-			s.Provider,
-			truncatePath(s.TargetDir, 35),
-			fmt.Sprintf("%d", s.Messages),
-		})
-	}
-	fmt.Fprintln(w, ui.RenderTable(headers, rows, -1))
-	fmt.Fprint(w, "Enter number or 'q' to cancel: ")
-
-	if !scanner.Scan() {
-		return ""
-	}
-	input := strings.TrimSpace(scanner.Text())
-	if input == "q" || input == "" {
-		return ""
-	}
-
-	n, err := strconv.Atoi(input)
-	if err != nil || n < 1 || n > len(summaries) {
-		fmt.Fprintln(w, ui.FormatWarning("Invalid selection."))
-		return ""
-	}
-
-	return summaries[n-1].ID
-}
-
 // handleRewind processes /rewind commands.
 func handleRewind(line string, state *chatState) {
 	cs := state.ag.Checkpoints()

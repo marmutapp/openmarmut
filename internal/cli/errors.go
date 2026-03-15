@@ -1,23 +1,22 @@
 package cli
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/marmutapp/openmarmut/internal/ui"
 )
 
-// styledError formats an error with FormatError and appends a hint if applicable.
-func styledError(err error) string {
+// StyledError formats an error with FormatError and appends a hint if applicable.
+func StyledError(err error) string {
 	msg := ui.FormatError(err.Error())
-	if hint := errorHint(err); hint != "" {
+	if hint := ErrorHint(err); hint != "" {
 		msg += "\n" + ui.FormatHint(hint)
 	}
 	return msg
 }
 
-// errorHint returns a hint string for common error patterns, or "" if none.
-func errorHint(err error) string {
+// ErrorHint returns a hint string for common error patterns, or "" if none.
+func ErrorHint(err error) string {
 	if err == nil {
 		return ""
 	}
@@ -33,7 +32,7 @@ func errorHint(err error) string {
 	case strings.Contains(s, "docker") && (strings.Contains(s, "Cannot connect") || strings.Contains(s, "connection refused")):
 		return "Start Docker with 'sudo service docker start' or 'docker desktop'"
 	case strings.Contains(s, "ErrAuthFailed") || (strings.Contains(s, "environment variable") && strings.Contains(s, "not set")):
-		return fmt.Sprintf("Set the required environment variable or add api_key to your provider config")
+		return "Set the required environment variable or add api_key to your provider config"
 	case strings.Contains(s, "path escapes target"):
 		return "Paths must be relative and within the target directory"
 	}

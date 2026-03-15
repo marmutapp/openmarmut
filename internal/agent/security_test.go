@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/marmutapp/openmarmut/internal/config"
@@ -276,7 +275,7 @@ func TestRun_NoCredentialKeys_NoBlocking(t *testing.T) {
 			{
 				StopReason: "tool_use",
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: "execute_command", Arguments: fmt.Sprintf(`{"command":"echo sk-secret"}`)}},
+					{ID: "call_1", Name: "execute_command", Arguments: `{"command":"echo sk-secret"}`}},
 			},
 			{Content: "Done", StopReason: "end"},
 		},

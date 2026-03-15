@@ -243,7 +243,7 @@ func TestRunHooks_HTTPHook_Success(t *testing.T) {
 			return
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"ok": true}`))
+		_, _ = w.Write([]byte(`{"ok": true}`))
 	}))
 	defer server.Close()
 
@@ -273,7 +273,7 @@ func TestRunHooks_HTTPHook_Success(t *testing.T) {
 func TestRunHooks_HTTPHook_AbortResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte(`{"abort": true, "reason": "not allowed"}`))
+		_, _ = w.Write([]byte(`{"abort": true, "reason": "not allowed"}`))
 	}))
 	defer server.Close()
 
@@ -298,7 +298,7 @@ func TestRunHooks_HTTPHook_AbortResponse(t *testing.T) {
 func TestRunHooks_HTTPHook_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	}))
 	defer server.Close()
 

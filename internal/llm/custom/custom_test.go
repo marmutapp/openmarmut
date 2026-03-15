@@ -29,8 +29,6 @@ func sseData(chunks ...string) string {
 	return b.String()
 }
 
-func strPtr(s string) *string { return &s }
-
 // --- Constructor Tests ---
 
 func TestNew_Success(t *testing.T) {

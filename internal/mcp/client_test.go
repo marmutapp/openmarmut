@@ -132,7 +132,7 @@ func mockMCPServer(t *testing.T) *httptest.Server {
 				Name      string         `json:"name"`
 				Arguments map[string]any `json:"arguments"`
 			}
-			json.Unmarshal(params, &callParams)
+			_ = json.Unmarshal(params, &callParams)
 
 			switch callParams.Name {
 			case "get_weather":

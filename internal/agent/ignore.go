@@ -210,23 +210,17 @@ func (il *IgnoreList) ShouldIgnoreEntry(name string, isDir bool) bool {
 
 // matchIgnorePattern checks if a path matches a gitignore-style pattern.
 func matchIgnorePattern(pattern, path string) bool {
-	// Directory pattern: ends with /
-	dirOnly := false
-	if strings.HasSuffix(pattern, "/") {
-		dirOnly = true
-		pattern = strings.TrimSuffix(pattern, "/")
-	}
+	// Directory pattern: ends with / — strip the trailing slash for matching.
+	pattern = strings.TrimSuffix(pattern, "/")
 
 	// Exact file/directory name match (no path separator in pattern).
 	if !strings.Contains(pattern, "/") {
 		// Match against any path component.
 		segments := strings.Split(path, "/")
-		for i, seg := range segments {
+		for _, seg := range segments {
 			if matchGlob(pattern, seg) {
-				if dirOnly && i == len(segments)-1 {
-					// Pattern requires directory but this is the final component
-					// — we don't know if it's a dir, so match anyway (conservative).
-				}
+				// Even if dirOnly and this is the final component, match conservatively
+				// since we don't know if it's a directory.
 				return true
 			}
 		}
