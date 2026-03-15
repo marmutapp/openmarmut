@@ -456,6 +456,26 @@
 
 ## Phase 13: Extensibility
 
+### Phase 13.3: Agent Teams — Parallel Coordinated Execution
+- [x] `internal/agent/filelock.go` — FileLock (per-path mutex, Acquire with timeout, Release, TryAcquire, Holder)
+- [x] `internal/agent/team.go` — Team struct, TeamConfig, TeamWorker, TeamResult, TeamSnapshot
+- [x] Team orchestration: 3-phase workflow (planning → execution → integration)
+- [x] Planning phase: lead agent breaks task into numbered subtasks
+- [x] Execution phase: workers run subtasks in parallel (goroutine + semaphore) or sequentially
+- [x] Integration phase: lead agent reviews all worker results and produces summary
+- [x] `lockedRuntime` — wraps Runtime with file locking on WriteFile/DeleteFile
+- [x] `WrapToolsWithFileLock` — wraps write_file/patch_file/delete_file tools with file lock
+- [x] `parsePlanTasks` — extracts numbered/dashed task lines from plan text
+- [x] `TeamManager` — Track, RunAsync, Cancel, CancelAll, List, HasRunning
+- [x] Multi-provider support: lead and worker agents can use different providers
+- [x] `internal/config/config.go` — TeamConfig struct in AgentConfig (max_members, lead_provider, worker_provider, strategy)
+- [x] `internal/cli/chat.go` — `/team <task>` slash command, `/team status`, `/team cancel`, `/team history`
+- [x] `/help` updated with /team entries
+- [x] FormatTeamResult, FormatTeamSnapshot display helpers
+- [x] `internal/agent/filelock_test.go` — 7 tests (acquire/release, try acquire, timeout, concurrent, different paths, holder, release unlocked)
+- [x] `internal/agent/team_test.go` — 16 tests (parse plan tasks x7, aggregate usage, new team defaults/custom, cancel, status snapshot, run parallel/sequential/no tasks/cancelled, format result/snapshot, team manager track+list/cancel all, wrap tools, locked runtime write/delete)
+- [x] All 19 packages pass
+
 ### Phase 13.1: Hooks System
 - [x] `internal/agent/hooks.go` — Hook struct, HookPayload, LoadHooks, RunHooks, runShellHook, runHTTPHook
 - [x] Shell hooks: sh -c execution, JSON payload via stdin, OPENMARMUT_EVENT/TOOL/SESSION env vars
@@ -562,5 +582,7 @@ Format: YYYY-MM-DD | Phase | What was accomplished | What's next
 2026-03-15 | Phase 13.1 | Hooks system: internal/agent/hooks.go with shell (sh -c, stdin payload, env vars) and HTTP (POST JSON, abort response, custom headers with env interpolation) hook types. 6 events (pre/post tool, session, compact), tool filtering, on_error abort/continue. HookConfig in config.go, WithHooks agent option, pre/post hooks wired into agent Run loop and CompactHistory. /hooks slash command (list/on/off/test), pre/post session hooks in chat lifecycle, hooks status on startup. 22 agent tests + 11 chat tests. All 19 packages pass. | Done
 
 2026-03-15 | Phase 13.2 | Image input for vision-capable models: ImageContent type on Message, LoadImage/LoadImageFromOS with magic-byte MIME detection, @ file references detect image extensions and return them separately, all 6 providers updated with multimodal content formatting (OpenAI image_url, Anthropic image source, Gemini inlineData, Ollama images array, Responses input_image, Custom image_url), --image flag on ask command, FormatImageAttachment UI helper, RunWithImages agent method. 12 agent tests + 4 filerefs tests + 2 provider tests. All 19 packages pass. | Done
+
+2026-03-15 | Phase 13.3 | Agent teams with parallel execution: FileLock (per-path mutex with timeout), Team struct with 3-phase orchestration (plan→execute→integrate), lockedRuntime for write safety, TeamManager for async execution, multi-provider support (lead/worker can differ), TeamConfig in config.yaml, /team slash command (task/status/cancel/history), parsePlanTasks, FormatTeamResult/Snapshot. 7 filelock tests + 16 team tests. All 19 packages pass. | Done
 
 <!-- Claude: append a new line here after each working session -->

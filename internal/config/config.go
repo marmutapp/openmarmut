@@ -51,9 +51,18 @@ type AgentConfig struct {
 	TruncationThreshold float64  `yaml:"truncation_threshold"` // Fraction at which truncation triggers (0.0–1.0, default 0.80).
 	KeepRecentTurns     int      `yaml:"keep_recent_turns"`    // Minimum recent turn pairs to preserve (default 4).
 	SessionRetentionDays int     `yaml:"session_retention_days"` // Days to keep sessions before auto-cleanup (default 30).
-	PlanProvider         string  `yaml:"plan_provider"`          // Provider name for plan mode analysis (empty = use active provider).
-	AutoMemory           bool    `yaml:"auto_memory"`            // Enable auto-memory extraction on session end (default true).
-	MemoryFile           string  `yaml:"memory_file"`            // Custom path for MEMORY.md (default ~/.openmarmut/memory/MEMORY.md).
+	PlanProvider         string     `yaml:"plan_provider"`          // Provider name for plan mode analysis (empty = use active provider).
+	AutoMemory           bool       `yaml:"auto_memory"`            // Enable auto-memory extraction on session end (default true).
+	MemoryFile           string     `yaml:"memory_file"`            // Custom path for MEMORY.md (default ~/.openmarmut/memory/MEMORY.md).
+	Team                 TeamConfig `yaml:"team"`                   // Agent team configuration.
+}
+
+// TeamConfig holds team orchestration settings.
+type TeamConfig struct {
+	MaxMembers     int    `yaml:"max_members"`     // Max parallel agents (default 3).
+	LeadProvider   string `yaml:"lead_provider"`   // Provider name for lead agent (planning).
+	WorkerProvider string `yaml:"worker_provider"` // Provider name for workers (execution).
+	Strategy       string `yaml:"strategy"`        // "parallel" or "sequential" (default "parallel").
 }
 
 // LLMConfig holds all LLM provider configuration.

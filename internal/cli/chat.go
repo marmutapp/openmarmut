@@ -65,6 +65,7 @@ type chatState struct {
 	bgMu             sync.Mutex       // protects bgJobs.
 	bgNextID         int              // next background job ID.
 	hooks            []agent.Hook     // configured hooks.
+	teamMgr          *agent.TeamManager // team execution manager.
 }
 
 // handleSlashCommand processes slash commands locally without calling the LLM.
@@ -171,6 +172,11 @@ func handleSlashCommand(line string, state *chatState) slashAction {
 		return slashHandled
 	}
 
+	if strings.HasPrefix(line, "/team") {
+		handleTeam(line, state)
+		return slashHandled
+	}
+
 	if strings.HasPrefix(line, "/hooks") {
 		handleHooks(line, state)
 		return slashHandled
@@ -270,6 +276,10 @@ func renderHelpBox(w io.Writer) {
 		{"/tasks add <title>", "Add a new task"},
 		{"/tasks done <id>", "Mark task as completed"},
 		{"/tasks clear", "Remove completed tasks"},
+		{"/team <task>", "Run task with parallel agent team"},
+		{"/team status", "Show current team execution"},
+		{"/team cancel", "Cancel all running teams"},
+		{"/team history", "Show past team executions"},
 		{"/bg <task>", "Run task in background sub-agent"},
 		{"/bg status", "Show background jobs"},
 		{"/bg cancel <id>", "Cancel a background job"},
@@ -1410,6 +1420,145 @@ func truncatePreviewStr(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// --- /team Agent Teams ---
+
+// handleTeam processes /team commands.
+// /team <task> — run task with parallel agent team.
+// /team status — show current team execution.
+// /team cancel — cancel all running teams.
+// /team history — show past team executions.
+func handleTeam(line string, state *chatState) {
+	arg := strings.TrimSpace(strings.TrimPrefix(line, "/team"))
+
+	if arg == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /team <task>, /team status, /team cancel, /team history"))
+		return
+	}
+
+	if state.teamMgr == nil {
+		state.teamMgr = agent.NewTeamManager()
+	}
+
+	if arg == "status" {
+		teams := state.teamMgr.List()
+		if len(teams) == 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("No teams."))
+			return
+		}
+		// Show the most recent team's status.
+		latest := teams[len(teams)-1]
+		snap := latest.StatusSnapshot()
+		fmt.Fprintln(state.out, ui.RenderBox("Team Status", agent.FormatTeamSnapshot(snap)))
+		return
+	}
+
+	if arg == "cancel" {
+		state.teamMgr.CancelAll()
+		fmt.Fprintln(state.out, ui.FormatSuccess("All running teams cancelled."))
+		return
+	}
+
+	if arg == "history" {
+		teams := state.teamMgr.List()
+		if len(teams) == 0 {
+			fmt.Fprintln(state.out, ui.FormatHint("No team history."))
+			return
+		}
+		headers := []string{"NAME", "STATUS", "TASK"}
+		var rows [][]string
+		for _, team := range teams {
+			task := team.Task
+			if len(task) > 50 {
+				task = task[:50] + "..."
+			}
+			rows = append(rows, []string{team.Name, team.Status, task})
+		}
+		fmt.Fprintln(state.out, ui.RenderTable(headers, rows, -1))
+		return
+	}
+
+	// /team <task> — spawn a team.
+	task := strings.Trim(arg, "\"'")
+	if task == "" {
+		fmt.Fprintln(state.out, ui.FormatWarning("Usage: /team <task>"))
+		return
+	}
+
+	provider := state.provider
+	if provider == nil {
+		fmt.Fprintln(state.out, ui.FormatError("No LLM provider configured."))
+		return
+	}
+
+	// Resolve lead and worker providers from config.
+	leadProvider := provider
+	workerProvider := provider
+	if state.cfg != nil {
+		teamCfg := state.cfg.Agent.Team
+		if teamCfg.LeadProvider != "" {
+			for _, p := range state.cfg.LLM.Providers {
+				if p.Name == teamCfg.LeadProvider {
+					lp, err := llm.NewProvider(p, state.log)
+					if err == nil {
+						leadProvider = lp
+					}
+					break
+				}
+			}
+		}
+		if teamCfg.WorkerProvider != "" {
+			for _, p := range state.cfg.LLM.Providers {
+				if p.Name == teamCfg.WorkerProvider {
+					wp, err := llm.NewProvider(p, state.log)
+					if err == nil {
+						workerProvider = wp
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// Build team config from app config.
+	teamCfg := agent.TeamConfig{
+		MaxMembers: agent.DefaultMaxMembers,
+		Strategy:   agent.DefaultTeamStrategy,
+	}
+	if state.cfg != nil {
+		if state.cfg.Agent.Team.MaxMembers > 0 {
+			teamCfg.MaxMembers = state.cfg.Agent.Team.MaxMembers
+		}
+		if state.cfg.Agent.Team.Strategy != "" {
+			teamCfg.Strategy = state.cfg.Agent.Team.Strategy
+		}
+	}
+
+	var teamOpts []agent.TeamOption
+	if state.cfg != nil {
+		teamOpts = append(teamOpts, agent.WithTeamConfig(state.cfg))
+	}
+	if state.ag != nil && state.ag.IgnoreList() != nil {
+		teamOpts = append(teamOpts, agent.WithTeamIgnoreList(state.ag.IgnoreList()))
+	}
+
+	team := agent.NewTeam("", task, teamCfg, state.rt, leadProvider, workerProvider, state.log, teamOpts...)
+	fmt.Fprintln(state.out, ui.FormatSuccess(fmt.Sprintf("Team '%s' started: %s", team.Name, task)))
+
+	state.teamMgr.RunAsync(context.Background(), team, nil, func(result *agent.TeamResult, err error) {
+		if err != nil {
+			fmt.Fprintf(state.out, "\a[team %s] FAILED: %s\n", team.Name, err.Error())
+			return
+		}
+		fmt.Fprintf(state.out, "\a[team %s] DONE — %d/%d tasks completed (%d tokens, %s)\n",
+			team.Name, result.CompletedTasks, result.TotalTasks,
+			result.TotalUsage.TotalTokens, result.Duration.Round(time.Millisecond))
+		if result.Summary != "" {
+			preview := truncatePreviewStr(result.Summary, 200)
+			fmt.Fprintf(state.out, "[team %s] Summary: %s\n", team.Name, preview)
+		}
+	})
+}
+
 // --- /model and /provider Slash Commands ---
 
 // handleModel processes /model commands.
@@ -1719,6 +1868,7 @@ func newChatCmd(runner *Runner) *cobra.Command {
 			state.targetDir = cfg.TargetDir
 			state.autoMemory = cfg.Agent.AutoMemory
 			state.subMgr = agent.NewSubAgentManager()
+			state.teamMgr = agent.NewTeamManager()
 			state.cfg = cfg
 			state.log = log
 			state.mcpMgr = mcpMgr
